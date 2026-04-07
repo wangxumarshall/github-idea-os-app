@@ -1,0 +1,330 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+type IdeaRecord struct {
+	ID                 string
+	WorkspaceID        string
+	OwnerUserID        string
+	GitHubAccountID    string
+	SeqNo              int
+	Code               string
+	SlugSuffix         string
+	SlugFull           string
+	Title              string
+	RawInput           string
+	Summary            string
+	Tags               []string
+	IdeaPath           string
+	MarkdownSHA        string
+	ProjectRepoName    string
+	ProjectRepoURL     string
+	ProjectRepoStatus  string
+	ProvisioningError  string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type IdeaJobRecord struct {
+	ID        string
+	IdeaID     string
+	JobType    string
+	Status     string
+	Attempts   int
+	Payload    map[string]any
+	LastError  string
+	RunAfter   time.Time
+}
+
+type IdeaNameSuggestion struct {
+	Name      string `json:"name"`
+	SlugSuffix string `json:"slug_suffix"`
+	FullName  string `json:"full_name"`
+}
+
+type IdeaStore struct{}
+
+func NewIdeaStore() *IdeaStore {
+	return &IdeaStore{}
+}
+
+func (s *IdeaStore) NextIdeaSequence(ctx context.Context, dbtx db.DBTX, githubAccountID string) (int, string, error) {
+	var seq int
+	var login string
+	err := dbtx.QueryRow(ctx, `
+		UPDATE github_account
+		SET next_idea_seq = next_idea_seq + 1,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING next_idea_seq, login
+	`, githubAccountID).Scan(&seq, &login)
+	if err != nil {
+		return 0, "", err
+	}
+	return seq, login, nil
+}
+
+func (s *IdeaStore) PeekNextIdeaSequence(ctx context.Context, dbtx db.DBTX, githubAccountID string) (int, error) {
+	var next int
+	err := dbtx.QueryRow(ctx, `
+		SELECT next_idea_seq + 1
+		FROM github_account
+		WHERE id = $1
+	`, githubAccountID).Scan(&next)
+	if err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+func (s *IdeaStore) InsertIdea(ctx context.Context, dbtx db.DBTX, record IdeaRecord) (IdeaRecord, error) {
+	tagsJSON, err := json.Marshal(record.Tags)
+	if err != nil {
+		return IdeaRecord{}, err
+	}
+
+	var created IdeaRecord
+	err = dbtx.QueryRow(ctx, `
+		INSERT INTO idea (
+			workspace_id, owner_user_id, github_account_id, seq_no, code, slug_suffix, slug_full,
+			title, raw_input, summary, tags, idea_path, markdown_sha, project_repo_name, project_repo_url,
+			project_repo_status, provisioning_error
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, NULLIF($13, ''), $14, $15, $16, NULLIF($17, ''))
+		RETURNING id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
+		          title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		          project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
+	`, record.WorkspaceID, record.OwnerUserID, record.GitHubAccountID, record.SeqNo, record.Code, record.SlugSuffix, record.SlugFull,
+		record.Title, record.RawInput, record.Summary, string(tagsJSON), record.IdeaPath, record.MarkdownSHA, record.ProjectRepoName, record.ProjectRepoURL,
+		record.ProjectRepoStatus, record.ProvisioningError).Scan(
+		&created.ID,
+		&created.WorkspaceID,
+		&created.OwnerUserID,
+		&created.GitHubAccountID,
+		&created.SeqNo,
+		&created.Code,
+		&created.SlugSuffix,
+		&created.SlugFull,
+		&created.Title,
+		&created.RawInput,
+		&created.Summary,
+		&tagsJSON,
+		&created.IdeaPath,
+		&created.MarkdownSHA,
+		&created.ProjectRepoName,
+		&created.ProjectRepoURL,
+		&created.ProjectRepoStatus,
+		&created.ProvisioningError,
+		&created.CreatedAt,
+		&created.UpdatedAt,
+	)
+	if err != nil {
+		return IdeaRecord{}, err
+	}
+	_ = json.Unmarshal(tagsJSON, &created.Tags)
+	return created, nil
+}
+
+func (s *IdeaStore) UpdateIdeaContent(ctx context.Context, dbtx db.DBTX, ideaID, title, summary, markdownSHA string, tags []string, provisioningStatus, provisioningError string) error {
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return err
+	}
+	_, err = dbtx.Exec(ctx, `
+		UPDATE idea
+		SET title = $2,
+		    summary = $3,
+		    tags = $4::jsonb,
+		    markdown_sha = NULLIF($5, ''),
+		    project_repo_status = COALESCE(NULLIF($6, ''), project_repo_status),
+		    provisioning_error = CASE WHEN $7 = '' THEN provisioning_error ELSE $7 END,
+		    updated_at = now()
+		WHERE id = $1
+	`, ideaID, title, summary, string(tagsJSON), markdownSHA, nullableOrEmpty(provisioningStatus), provisioningError)
+	return err
+}
+
+func (s *IdeaStore) UpdateIdeaRepoState(ctx context.Context, dbtx db.DBTX, ideaID, repoURL, status, provisioningError string) error {
+	_, err := dbtx.Exec(ctx, `
+		UPDATE idea
+		SET project_repo_url = $2,
+		    project_repo_status = $3,
+		    provisioning_error = NULLIF($4, ''),
+		    updated_at = now()
+		WHERE id = $1
+	`, ideaID, repoURL, status, provisioningError)
+	return err
+}
+
+func (s *IdeaStore) GetIdeaBySlug(ctx context.Context, dbtx db.DBTX, workspaceID, slugFull string) (*IdeaRecord, error) {
+	rows, err := dbtx.Query(ctx, `
+		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
+		FROM idea
+		WHERE workspace_id = $1 AND slug_full = $2
+		LIMIT 1
+	`, workspaceID, slugFull)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, fmt.Errorf("idea not found")
+	}
+
+	record, err := scanIdea(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (s *IdeaStore) ListIdeasByWorkspace(ctx context.Context, dbtx db.DBTX, workspaceID string) ([]IdeaRecord, error) {
+	rows, err := dbtx.Query(ctx, `
+		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
+		FROM idea
+		WHERE workspace_id = $1
+		ORDER BY updated_at DESC, seq_no DESC
+	`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ideas []IdeaRecord
+	for rows.Next() {
+		record, err := scanIdea(rows)
+		if err != nil {
+			return nil, err
+		}
+		ideas = append(ideas, record)
+	}
+	return ideas, rows.Err()
+}
+
+func (s *IdeaStore) EnqueueRepoProvisionJob(ctx context.Context, dbtx db.DBTX, ideaID string) error {
+	_, err := dbtx.Exec(ctx, `
+		INSERT INTO idea_job (idea_id, job_type, status, payload)
+		VALUES ($1, 'create_project_repo', 'queued', '{}'::jsonb)
+	`, ideaID)
+	return err
+}
+
+func (s *IdeaStore) RetryRepoProvisionJob(ctx context.Context, dbtx db.DBTX, ideaID string) error {
+	_, err := dbtx.Exec(ctx, `
+		UPDATE idea
+		SET project_repo_status = 'creating',
+		    provisioning_error = NULL,
+		    updated_at = now()
+		WHERE id = $1
+	`, ideaID)
+	if err != nil {
+		return err
+	}
+	_, err = dbtx.Exec(ctx, `
+		INSERT INTO idea_job (idea_id, job_type, status, payload)
+		VALUES ($1, 'create_project_repo', 'queued', '{}'::jsonb)
+	`, ideaID)
+	return err
+}
+
+func (s *IdeaStore) ClaimNextJob(ctx context.Context, dbtx db.DBTX) (*IdeaJobRecord, error) {
+	rows, err := dbtx.Query(ctx, `
+		UPDATE idea_job
+		SET status = 'running',
+		    attempts = attempts + 1,
+		    locked_at = now(),
+		    updated_at = now()
+		WHERE id = (
+			SELECT id
+			FROM idea_job
+			WHERE status = 'queued' AND run_after <= now()
+			ORDER BY created_at ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		RETURNING id::text, idea_id::text, job_type, status, attempts, payload, COALESCE(last_error, ''), run_after
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	var job IdeaJobRecord
+	var payloadJSON []byte
+	if err := rows.Scan(&job.ID, &job.IdeaID, &job.JobType, &job.Status, &job.Attempts, &payloadJSON, &job.LastError, &job.RunAfter); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(payloadJSON, &job.Payload)
+	return &job, nil
+}
+
+func (s *IdeaStore) MarkJobCompleted(ctx context.Context, dbtx db.DBTX, jobID string) error {
+	_, err := dbtx.Exec(ctx, `
+		UPDATE idea_job
+		SET status = 'completed',
+		    completed_at = now(),
+		    updated_at = now()
+		WHERE id = $1
+	`, jobID)
+	return err
+}
+
+func (s *IdeaStore) MarkJobFailed(ctx context.Context, dbtx db.DBTX, jobID, reason string) error {
+	_, err := dbtx.Exec(ctx, `
+		UPDATE idea_job
+		SET status = 'failed',
+		    last_error = $2,
+		    updated_at = now()
+		WHERE id = $1
+	`, jobID, reason)
+	return err
+}
+
+func scanIdea(rows interface{ Scan(dest ...any) error }) (IdeaRecord, error) {
+	var record IdeaRecord
+	var tagsJSON []byte
+	if err := rows.Scan(
+		&record.ID,
+		&record.WorkspaceID,
+		&record.OwnerUserID,
+		&record.GitHubAccountID,
+		&record.SeqNo,
+		&record.Code,
+		&record.SlugSuffix,
+		&record.SlugFull,
+		&record.Title,
+		&record.RawInput,
+		&record.Summary,
+		&tagsJSON,
+		&record.IdeaPath,
+		&record.MarkdownSHA,
+		&record.ProjectRepoName,
+		&record.ProjectRepoURL,
+		&record.ProjectRepoStatus,
+		&record.ProvisioningError,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return IdeaRecord{}, err
+	}
+	_ = json.Unmarshal(tagsJSON, &record.Tags)
+	return record, nil
+}
+
+func nullableOrEmpty(value string) string {
+	return strings.TrimSpace(value)
+}

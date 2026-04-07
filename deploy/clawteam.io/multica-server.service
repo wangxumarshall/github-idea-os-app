@@ -1,0 +1,19 @@
+[Unit]
+Description=Multica API server
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/multica
+EnvironmentFile=/home/ubuntu/multica/.env
+ExecStart=/home/ubuntu/multica/server/bin/server
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

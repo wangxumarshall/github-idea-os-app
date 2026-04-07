@@ -1,0 +1,19 @@
+[Unit]
+Description=Multica web frontend
+After=network.target multica-server.service
+Requires=multica-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/multica
+EnvironmentFile=/home/ubuntu/multica/.env
+ExecStart=/usr/bin/env PORT=13000 /usr/bin/pnpm --dir /home/ubuntu/multica/apps/web exec next start --hostname 127.0.0.1 --port 13000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

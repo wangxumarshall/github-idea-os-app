@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS idea_job;
+DROP TABLE IF EXISTS idea;
+DROP TABLE IF EXISTS github_account;

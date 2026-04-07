@@ -1,0 +1,20 @@
+{
+    email wangxumarshall@qq.com
+}
+
+http://43.156.84.109 {
+    redir https://clawteam.io{uri} permanent
+}
+
+www.clawteam.io {
+    redir https://clawteam.io{uri} permanent
+}
+
+clawteam.io {
+    encode zstd gzip
+
+    @backend path /api/* /auth/* /ws /health
+    reverse_proxy @backend 127.0.0.1:18080
+
+    reverse_proxy 127.0.0.1:13000
+}
