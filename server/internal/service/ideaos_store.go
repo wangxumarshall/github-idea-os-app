@@ -45,9 +45,9 @@ type IdeaJobRecord struct {
 }
 
 type IdeaNameSuggestion struct {
-	Name      string `json:"name"`
+	Name       string `json:"name"`
 	SlugSuffix string `json:"slug_suffix"`
-	FullName  string `json:"full_name"`
+	FullName   string `json:"full_name"`
 }
 
 type IdeaStore struct{}
@@ -145,7 +145,7 @@ func (s *IdeaStore) UpdateIdeaContent(ctx context.Context, dbtx db.DBTX, ideaID,
 		    tags = $4::jsonb,
 		    markdown_sha = NULLIF($5, ''),
 		    project_repo_status = COALESCE(NULLIF($6, ''), project_repo_status),
-		    provisioning_error = CASE WHEN $7 = '' THEN provisioning_error ELSE $7 END,
+		    provisioning_error = NULLIF($7, ''),
 		    updated_at = now()
 		WHERE id = $1
 	`, ideaID, title, summary, string(tagsJSON), markdownSHA, nullableOrEmpty(provisioningStatus), provisioningError)
@@ -211,6 +211,29 @@ func (s *IdeaStore) ListIdeasByWorkspace(ctx context.Context, dbtx db.DBTX, work
 		ideas = append(ideas, record)
 	}
 	return ideas, rows.Err()
+}
+
+func (s *IdeaStore) GetIdeaByID(ctx context.Context, dbtx db.DBTX, ideaID string) (*IdeaRecord, error) {
+	rows, err := dbtx.Query(ctx, `
+		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
+		FROM idea
+		WHERE id = $1
+		LIMIT 1
+	`, ideaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, fmt.Errorf("idea not found")
+	}
+	record, err := scanIdea(rows)
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
 }
 
 func (s *IdeaStore) EnqueueRepoProvisionJob(ctx context.Context, dbtx db.DBTX, ideaID string) error {
@@ -327,4 +350,90 @@ func scanIdea(rows interface{ Scan(dest ...any) error }) (IdeaRecord, error) {
 
 func nullableOrEmpty(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func RecommendIdeaNames(rawInput string, nextCode int) []IdeaNameSuggestion {
+	code := fmt.Sprintf("idea%04d", nextCode)
+	text := strings.TrimSpace(rawInput)
+	if text == "" {
+		return nil
+	}
+
+	parts := strings.Fields(strings.ToLower(text))
+	stopwords := map[string]struct{}{
+		"the": {}, "a": {}, "an": {}, "to": {}, "for": {}, "of": {}, "and": {}, "or": {},
+		"with": {}, "build": {}, "make": {}, "create": {}, "doing": {}, "idea": {}, "app": {},
+	}
+
+	keywords := make([]string, 0, 6)
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		part = NormalizeIdeaSlug(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := stopwords[part]; ok {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		keywords = append(keywords, part)
+		if len(keywords) == 6 {
+			break
+		}
+	}
+
+	makeName := func(items ...string) IdeaNameSuggestion {
+		suffix := NormalizeIdeaSlug(strings.Join(items, "-"))
+		if suffix == "" {
+			suffix = "new-idea"
+		}
+		name := prettifyIdeaSlug(suffix)
+		return IdeaNameSuggestion{
+			Name:       name,
+			SlugSuffix: suffix,
+			FullName:   code + "-" + suffix,
+		}
+	}
+
+	var candidates []IdeaNameSuggestion
+	switch {
+	case len(keywords) >= 3:
+		candidates = []IdeaNameSuggestion{
+			makeName(keywords[0], keywords[1], keywords[2]),
+			makeName(keywords[0], keywords[1], "system"),
+			makeName(keywords[0], keywords[1], "studio"),
+		}
+	case len(keywords) == 2:
+		candidates = []IdeaNameSuggestion{
+			makeName(keywords[0], keywords[1]),
+			makeName(keywords[0], keywords[1], "studio"),
+			makeName(keywords[0], keywords[1], "engine"),
+		}
+	case len(keywords) == 1:
+		candidates = []IdeaNameSuggestion{
+			makeName(keywords[0], "studio"),
+			makeName(keywords[0], "engine"),
+			makeName(keywords[0], "workspace"),
+		}
+	default:
+		candidates = []IdeaNameSuggestion{
+			makeName("new", "idea"),
+			makeName("product", "concept"),
+			makeName("technical", "idea"),
+		}
+	}
+
+	unique := make([]IdeaNameSuggestion, 0, len(candidates))
+	seenNames := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if _, ok := seenNames[candidate.SlugSuffix]; ok {
+			continue
+		}
+		seenNames[candidate.SlugSuffix] = struct{}{}
+		unique = append(unique, candidate)
+	}
+	return unique
 }

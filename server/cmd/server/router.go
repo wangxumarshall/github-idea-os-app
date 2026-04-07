@@ -83,6 +83,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/password-login", h.PasswordLogin)
+	r.Get("/auth/github/callback", h.GitHubOAuthCallback)
 
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -116,6 +117,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/upload-file", h.UploadFile)
+		r.Get("/api/github/oauth/start", h.StartGitHubOAuth)
+		r.Get("/api/github/account", h.GetGitHubAccount)
+		r.Delete("/api/github/account", h.DeleteGitHubAccount)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -157,9 +161,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Get("/api/ideas/config", h.GetIdeaOSConfig)
 			r.Route("/api/ideas", func(r chi.Router) {
 				r.Get("/", h.ListIdeas)
+				r.Post("/recommend-name", h.RecommendIdeaNames)
 				r.Post("/", h.CreateIdea)
 				r.Get("/{slug}", h.GetIdea)
 				r.Put("/{slug}", h.UpdateIdea)
+				r.Post("/{slug}/retry-repo", h.RetryIdeaRepoProvision)
 			})
 
 			// Issues

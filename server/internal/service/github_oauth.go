@@ -230,6 +230,31 @@ func (s *GitHubOAuthService) GetAccountByUser(ctx context.Context, dbtx db.DBTX,
 	return &account, nil
 }
 
+func (s *GitHubOAuthService) GetAccountByID(ctx context.Context, dbtx db.DBTX, accountID string) (*GitHubAccount, error) {
+	row := dbtx.QueryRow(ctx, `
+		SELECT id::text, user_id::text, github_user_id, login, COALESCE(avatar_url, ''), COALESCE(profile_url, ''), access_token_encrypted, token_type, scope, next_idea_seq
+		FROM github_account
+		WHERE id = $1
+	`, accountID)
+
+	var account GitHubAccount
+	if err := row.Scan(
+		&account.ID,
+		&account.UserID,
+		&account.GitHubUserID,
+		&account.Login,
+		&account.AvatarURL,
+		&account.ProfileURL,
+		&account.AccessTokenEncrypted,
+		&account.TokenType,
+		&account.Scope,
+		&account.NextIdeaSeq,
+	); err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
 func (s *GitHubOAuthService) DeleteAccountByUser(ctx context.Context, dbtx db.DBTX, userID string) error {
 	_, err := dbtx.Exec(ctx, `DELETE FROM github_account WHERE user_id = $1`, userID)
 	return err

@@ -14,23 +14,22 @@ func TestIdeaOSSettingsRoundTrip(t *testing.T) {
 	svc := NewGitHubIdeaOSService()
 
 	raw, publicCfg, err := svc.UpdateSettings(nil, IdeaOSConfigUpdate{
-		RepoURL:      "https://github.com/example/ideas",
-		Branch:       "main",
-		Directory:    "ideas",
-		GitHubToken:  "ghp_test",
-		ReplaceToken: true,
+		RepoURL:        "https://github.com/example/ideas",
+		Branch:         "main",
+		Directory:      "ideas",
+		RepoVisibility: "private",
 	})
 	if err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
 	}
 
-	if !publicCfg.TokenConfigured {
-		t.Fatal("expected token_configured to be true")
+	if publicCfg.RepoVisibility != "private" {
+		t.Fatalf("expected repo visibility private, got %q", publicCfg.RepoVisibility)
 	}
 
 	cfg := IdeaOSConfigFromSettings(raw)
-	if cfg.GitHubToken != "ghp_test" {
-		t.Fatalf("expected token to round-trip, got %q", cfg.GitHubToken)
+	if cfg.RepoURL != "https://github.com/example/ideas" {
+		t.Fatalf("expected repo URL to round-trip, got %q", cfg.RepoURL)
 	}
 
 	sanitized := svc.SanitizeSettings(raw)
@@ -45,8 +44,8 @@ func TestIdeaOSSettingsRoundTrip(t *testing.T) {
 	if _, exists := idea["github_token"]; exists {
 		t.Fatal("expected github_token to be removed from sanitized settings")
 	}
-	if idea["token_configured"] != true {
-		t.Fatalf("expected token_configured=true, got %#v", idea["token_configured"])
+	if idea["repo_visibility"] != "private" {
+		t.Fatalf("expected repo_visibility=private, got %#v", idea["repo_visibility"])
 	}
 }
 

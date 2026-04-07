@@ -95,7 +95,7 @@ type ideaFrontmatter struct {
 	ProjectRepoStatus string   `yaml:"project_repo_status,omitempty"`
 }
 
-type githubRepositoryResponse struct {
+type GitHubRepository struct {
 	Name          string `json:"name"`
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
@@ -493,6 +493,14 @@ func (s *GitHubIdeaOSService) getFileByPath(ctx context.Context, cfg IdeaOSConfi
 	return file, nil
 }
 
+func (s *GitHubIdeaOSService) GetMarkdownFile(ctx context.Context, cfg IdeaOSConfig, filePath string) (string, string, error) {
+	file, err := s.getFileByPath(ctx, cfg, filePath)
+	if err != nil {
+		return "", "", err
+	}
+	return file.Content, file.SHA, nil
+}
+
 func (s *GitHubIdeaOSService) putFile(ctx context.Context, cfg IdeaOSConfig, filePath, markdown, sha, message string) (githubPutContentResponse, error) {
 	reqBody := githubPutContentRequest{
 		Message: message,
@@ -508,16 +516,24 @@ func (s *GitHubIdeaOSService) putFile(ctx context.Context, cfg IdeaOSConfig, fil
 	return resp, nil
 }
 
-func (s *GitHubIdeaOSService) CreatePrivateRepository(ctx context.Context, token, repoName string) (githubRepositoryResponse, error) {
+func (s *GitHubIdeaOSService) PutMarkdownFile(ctx context.Context, cfg IdeaOSConfig, filePath, markdown, sha, message string) (string, error) {
+	resp, err := s.putFile(ctx, cfg, filePath, markdown, sha, message)
+	if err != nil {
+		return "", err
+	}
+	return resp.Content.SHA, nil
+}
+
+func (s *GitHubIdeaOSService) CreatePrivateRepository(ctx context.Context, token, repoName string) (GitHubRepository, error) {
 	reqBody := map[string]any{
 		"name":         strings.TrimSpace(repoName),
 		"private":      true,
 		"auto_init":    true,
 		"description":  "Project repository provisioned by GitHub IdeaOS",
 	}
-	var resp githubRepositoryResponse
+	var resp GitHubRepository
 	if err := s.doJSON(ctx, http.MethodPost, strings.TrimRight(s.BaseURL, "/")+"/user/repos", token, reqBody, &resp); err != nil {
-		return githubRepositoryResponse{}, err
+		return GitHubRepository{}, err
 	}
 	return resp, nil
 }
@@ -757,6 +773,10 @@ func ideaPath(cfg IdeaOSConfig, slug string) string {
 	return path.Join(normalizeIdeaOSDirectory(cfg.Directory), slug, slug+".md")
 }
 
+func IdeaPath(cfg IdeaOSConfig, slug string) string {
+	return ideaPath(cfg, slug)
+}
+
 func normalizeIdeaSlug(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
@@ -772,6 +792,10 @@ func normalizeIdeaSlug(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+func NormalizeIdeaSlug(value string) string {
+	return normalizeIdeaSlug(value)
 }
 
 func prettifyIdeaSlug(slug string) string {
