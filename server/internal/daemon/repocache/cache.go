@@ -169,10 +169,22 @@ type WorktreeResult struct {
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
 // a git worktree in the agent's working directory.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
+	c.mu.Lock()
 	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
 	if barePath == "" {
-		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
+		wsDir := filepath.Join(c.root, params.WorkspaceID)
+		if err := os.MkdirAll(wsDir, 0o755); err != nil {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("create workspace cache dir: %w", err)
+		}
+		barePath = filepath.Join(wsDir, bareDirName(params.RepoURL))
+		c.logger.Info("repo checkout: repo not cached, cloning on demand", "url", params.RepoURL, "path", barePath)
+		if err := gitCloneBare(params.RepoURL, barePath); err != nil {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("repo not found in cache and on-demand clone failed: %w", err)
+		}
 	}
+	c.mu.Unlock()
 
 	// Fetch latest from origin.
 	if err := gitFetch(barePath); err != nil {

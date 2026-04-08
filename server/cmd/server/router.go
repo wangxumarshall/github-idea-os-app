@@ -163,9 +163,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/", h.ListIdeas)
 				r.Post("/recommend-name", h.RecommendIdeaNames)
 				r.Post("/", h.CreateIdea)
-				r.Get("/{slug}", h.GetIdea)
-				r.Put("/{slug}", h.UpdateIdea)
-				r.Post("/{slug}/retry-repo", h.RetryIdeaRepoProvision)
+				r.Route("/{slug}", func(r chi.Router) {
+					r.Get("/", h.GetIdea)
+					r.Put("/", h.UpdateIdea)
+					r.Get("/issues", h.ListIdeaIssues)
+					r.Post("/issues", h.CreateIdeaIssue)
+					r.Post("/retry-repo", h.RetryIdeaRepoProvision)
+				})
 			})
 
 			// Issues

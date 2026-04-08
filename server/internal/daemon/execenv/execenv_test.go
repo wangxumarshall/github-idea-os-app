@@ -441,6 +441,39 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigIncludesIdeaAndSelectedRepo(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:                 "test-issue-id",
+		IdeaSlug:                "idea0001-repo-brain",
+		SelectedRepoURL:         "https://github.com/example/repo-brain",
+		SelectedRepoDescription: "Idea project repository",
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"multica idea get idea0001-repo-brain --output json",
+		"Preferred repository for this issue",
+		"https://github.com/example/repo-brain",
+		"Idea project repository",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
 func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type IdeaOSConfigResponse struct {
@@ -18,10 +21,11 @@ type IdeaOSConfigResponse struct {
 }
 
 type UpdateIdeaOSConfigRequest struct {
-	RepoURL        *string `json:"repo_url"`
-	Branch         *string `json:"branch"`
-	Directory      *string `json:"directory"`
-	RepoVisibility *string `json:"repo_visibility"`
+	RepoURL         *string  `json:"repo_url"`
+	Branch          *string  `json:"branch"`
+	Directory       *string  `json:"directory"`
+	RepoVisibility  *string  `json:"repo_visibility"`
+	DefaultAgentIDs []string `json:"default_agent_ids"`
 }
 
 type RecommendIdeaNameRequest struct {
@@ -29,7 +33,7 @@ type RecommendIdeaNameRequest struct {
 }
 
 type RecommendIdeaNameResponse struct {
-	NextCode    string                      `json:"next_code"`
+	NextCode    string                       `json:"next_code"`
 	Suggestions []service.IdeaNameSuggestion `json:"suggestions"`
 }
 
@@ -38,12 +42,114 @@ type CreateIdeaRequest struct {
 	SelectedName string `json:"selected_name"`
 }
 
+type IdeaIssuesResponse struct {
+	RootIssue   *IssueResponse  `json:"root_issue"`
+	ChildIssues []IssueResponse `json:"child_issues"`
+}
+
 type UpdateIdeaRequest struct {
-	Title     string   `json:"title"`
-	Content   string   `json:"content"`
-	Tags      []string `json:"tags"`
-	CreatedAt string   `json:"created_at"`
-	SHA       string   `json:"sha"`
+	Title         string   `json:"title"`
+	Content       string   `json:"content"`
+	BaseTitle     string   `json:"base_title"`
+	BaseContent   string   `json:"base_content"`
+	Tags          []string `json:"tags"`
+	BaseTags      []string `json:"base_tags"`
+	CreatedAt     string   `json:"created_at"`
+	BaseCreatedAt string   `json:"base_created_at"`
+	SHA           string   `json:"sha"`
+}
+
+func stringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func buildIdeaRootIssueDescription(idea service.IdeaRecord) string {
+	var b strings.Builder
+
+	b.WriteString("# Idea Delivery\n\n")
+	b.WriteString("Implement the project described by this idea.\n\n")
+	b.WriteString("- Idea code: `" + idea.Code + "`\n")
+	b.WriteString("- Idea title: " + idea.Title + "\n")
+	b.WriteString("- Idea slug: `" + idea.SlugFull + "`\n")
+	b.WriteString("- Idea markdown: `" + idea.IdeaPath + "`\n")
+	if strings.TrimSpace(idea.ProjectRepoURL) != "" {
+		b.WriteString("- Project repository: " + strings.TrimSpace(idea.ProjectRepoURL) + "\n")
+	}
+	b.WriteString("\n## Workflow\n\n")
+	b.WriteString("1. Run `multica idea get " + idea.SlugFull + " --output json`\n")
+	b.WriteString("2. Treat the full idea markdown as the product and technical source of truth\n")
+	b.WriteString("3. Implement the project in the repository bound to this issue\n")
+
+	if strings.TrimSpace(idea.Summary) != "" {
+		b.WriteString("\n## Summary\n\n")
+		b.WriteString(idea.Summary)
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (h *Handler) validateDefaultIdeaAgentIDs(r *http.Request, workspaceID string, ids []string) ([]string, error) {
+	normalized := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, agentID := range ids {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		if _, ok := seen[agentID]; ok {
+			continue
+		}
+		seen[agentID] = struct{}{}
+		normalized = append(normalized, agentID)
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+
+	agents, err := h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		return nil, err
+	}
+
+	valid := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		if agent.ArchivedAt.Valid {
+			continue
+		}
+		valid[uuidToString(agent.ID)] = struct{}{}
+	}
+
+	for _, agentID := range normalized {
+		if _, ok := valid[agentID]; !ok {
+			return nil, fmt.Errorf("invalid default idea agent: %s", agentID)
+		}
+	}
+
+	return normalized, nil
+}
+
+func (h *Handler) resolveDefaultIdeaAgent(r *http.Request, workspaceID string, cfg service.IdeaOSConfig) *db.Agent {
+	for _, agentID := range cfg.DefaultAgentIDs {
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          parseUUID(agentID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+			continue
+		}
+		return &agent
+	}
+	return nil
+}
+
+func (h *Handler) ideaIssueResponse(ctx context.Context, issue db.Issue) IssueResponse {
+	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	return h.issueResponse(ctx, issue, prefix)
 }
 
 func (h *Handler) loadWorkspaceByID(r *http.Request, workspaceID string) (db.Workspace, bool, error) {
@@ -154,6 +260,14 @@ func (h *Handler) UpdateIdeaOSConfig(w http.ResponseWriter, r *http.Request) {
 	if req.RepoVisibility != nil {
 		update.RepoVisibility = strings.TrimSpace(*req.RepoVisibility)
 	}
+	if req.DefaultAgentIDs != nil {
+		validatedIDs, err := h.validateDefaultIdeaAgentIDs(r, workspaceID, req.DefaultAgentIDs)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		update.DefaultAgentIDs = &validatedIDs
+	}
 
 	settingsJSON, publicConfig, err := h.IdeaOS.UpdateSettings(workspace.Settings, update)
 	if err != nil {
@@ -236,6 +350,7 @@ func (h *Handler) ListIdeas(w http.ResponseWriter, r *http.Request) {
 			ProjectRepoURL:    idea.ProjectRepoURL,
 			ProjectRepoStatus: idea.ProjectRepoStatus,
 			ProvisioningError: idea.ProvisioningError,
+			RootIssueID:       idea.RootIssueID,
 			CreatedAt:         idea.CreatedAt.Format("2006-01-02"),
 			UpdatedAt:         idea.UpdatedAt.Format("2006-01-02"),
 		})
@@ -344,6 +459,38 @@ func (h *Handler) CreateIdea(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var rootIssue db.Issue
+	defaultAgent := h.resolveDefaultIdeaAgent(r, workspaceID, cfg)
+	rootIssueReq := CreateIssueRequest{
+		Title:       fmt.Sprintf("Build %s", parsed.Title),
+		Description: stringPtr(buildIdeaRootIssueDescription(record)),
+		Status:      "todo",
+		Priority:    "medium",
+		RepoURL:     stringPtr(projectRepoURL),
+	}
+	if defaultAgent != nil {
+		agentID := uuidToString(defaultAgent.ID)
+		rootIssueReq.AssigneeType = stringPtr("agent")
+		rootIssueReq.AssigneeID = &agentID
+	}
+
+	rootIssueNumber, err := h.Queries.WithTx(tx).IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to allocate root issue sequence")
+		return
+	}
+
+	rootIssue, err = h.createIssueRecord(r.Context(), h.Queries.WithTx(tx), workspaceID, "member", userID, rootIssueReq, rootIssueNumber, &record.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create root issue")
+		return
+	}
+
+	if err := h.IdeaStore.UpdateIdeaRootIssue(r.Context(), tx, record.ID, uuidToString(rootIssue.ID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to link root issue")
+		return
+	}
+
 	if err := h.IdeaStore.EnqueueRepoProvisionJob(r.Context(), tx, record.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue repository provisioning")
 		return
@@ -361,6 +508,10 @@ func (h *Handler) CreateIdea(w http.ResponseWriter, r *http.Request) {
 	parsed.ProjectRepoName = slugFull
 	parsed.ProjectRepoURL = projectRepoURL
 	parsed.ProjectRepoStatus = "creating"
+	parsed.RootIssueID = uuidToString(rootIssue.ID)
+
+	rootResp := h.ideaIssueResponse(r.Context(), rootIssue)
+	h.publish(protocol.EventIssueCreated, workspaceID, "member", userID, map[string]any{"issue": rootResp})
 	writeJSON(w, http.StatusCreated, parsed)
 }
 
@@ -392,6 +543,7 @@ func (h *Handler) GetIdea(w http.ResponseWriter, r *http.Request) {
 	doc.ProjectRepoURL = record.ProjectRepoURL
 	doc.ProjectRepoStatus = record.ProjectRepoStatus
 	doc.ProvisioningError = record.ProvisioningError
+	doc.RootIssueID = record.RootIssueID
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -413,46 +565,37 @@ func (h *Handler) UpdateIdea(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc := service.IdeaDocument{
-		IdeaSummary: service.IdeaSummary{
-			Code:              record.Code,
-			Slug:              record.SlugFull,
-			Path:              record.IdeaPath,
-			Title:             req.Title,
-			Tags:              req.Tags,
-			CreatedAt:         req.CreatedAt,
-			ProjectRepoName:   record.ProjectRepoName,
-			ProjectRepoURL:    record.ProjectRepoURL,
-			ProjectRepoStatus: record.ProjectRepoStatus,
-		},
-		Content: req.Content,
-		SHA:     req.SHA,
-	}
-
-	rendered, err := service.RenderIdeaDocument(doc)
+	parsed, err := h.IdeaOS.UpdateIdea(r.Context(), cfg, service.UpdateIdeaInput{
+		Slug:              record.SlugFull,
+		Code:              record.Code,
+		Title:             req.Title,
+		Content:           req.Content,
+		BaseTitle:         req.BaseTitle,
+		BaseContent:       req.BaseContent,
+		Tags:              req.Tags,
+		BaseTags:          req.BaseTags,
+		CreatedAt:         req.CreatedAt,
+		BaseCreatedAt:     req.BaseCreatedAt,
+		SHA:               strings.TrimSpace(req.SHA),
+		ProjectRepoName:   record.ProjectRepoName,
+		ProjectRepoURL:    record.ProjectRepoURL,
+		ProjectRepoStatus: record.ProjectRepoStatus,
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to render idea markdown")
-		return
-	}
-
-	parsed, err := service.ParseIdeaDocument(record.IdeaPath, "", rendered)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to parse idea markdown")
-		return
-	}
-
-	sha, err := h.IdeaOS.PutMarkdownFile(r.Context(), cfg, record.IdeaPath, rendered, strings.TrimSpace(req.SHA), fmt.Sprintf("update idea: %s", record.SlugFull))
-	if err != nil {
+		var conflictErr *service.IdeaConflictError
+		if errors.As(err, &conflictErr) {
+			writeError(w, http.StatusConflict, conflictErr.Error())
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.IdeaStore.UpdateIdeaContent(r.Context(), h.DB, record.ID, parsed.Title, parsed.Summary, sha, parsed.Tags, "", ""); err != nil {
+	if err := h.IdeaStore.UpdateIdeaContent(r.Context(), h.DB, record.ID, parsed.Title, parsed.Summary, parsed.SHA, parsed.Tags, "", ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update idea metadata")
 		return
 	}
 
-	parsed.SHA = sha
 	parsed.Code = record.Code
 	parsed.Slug = record.SlugFull
 	parsed.Path = record.IdeaPath
@@ -460,6 +603,7 @@ func (h *Handler) UpdateIdea(w http.ResponseWriter, r *http.Request) {
 	parsed.ProjectRepoURL = record.ProjectRepoURL
 	parsed.ProjectRepoStatus = record.ProjectRepoStatus
 	parsed.ProvisioningError = record.ProvisioningError
+	parsed.RootIssueID = record.RootIssueID
 	writeJSON(w, http.StatusOK, parsed)
 }
 
@@ -487,8 +631,124 @@ func (h *Handler) RetryIdeaRepoProvision(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "repository provisioning retried"})
 }
 
+func (h *Handler) ListIdeaIssues(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+
+	record, err := h.IdeaStore.GetIdeaBySlug(r.Context(), h.DB, workspaceID, chi.URLParam(r, "slug"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "idea not found")
+		return
+	}
+
+	if record.RootIssueID == "" {
+		writeJSON(w, http.StatusOK, IdeaIssuesResponse{ChildIssues: []IssueResponse{}})
+		return
+	}
+
+	issues, err := h.Queries.ListIssuesByIdeaID(r.Context(), parseUUID(record.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list idea issues")
+		return
+	}
+
+	resp := IdeaIssuesResponse{ChildIssues: make([]IssueResponse, 0, len(issues))}
+	for _, issue := range issues {
+		issueResp := h.ideaIssueResponse(r.Context(), issue)
+		if uuidToString(issue.ID) == record.RootIssueID {
+			copyResp := issueResp
+			resp.RootIssue = &copyResp
+			continue
+		}
+		resp.ChildIssues = append(resp.ChildIssues, issueResp)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) CreateIdeaIssue(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	record, err := h.IdeaStore.GetIdeaBySlug(r.Context(), h.DB, workspaceID, chi.URLParam(r, "slug"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "idea not found")
+		return
+	}
+	if record.RootIssueID == "" {
+		writeError(w, http.StatusConflict, "idea root issue is not initialized")
+		return
+	}
+
+	var req CreateIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if _, err := parseIssueDueDate(req.DueDate); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.RepoURL == nil || strings.TrimSpace(*req.RepoURL) == "" {
+		req.RepoURL = stringPtr(record.ProjectRepoURL)
+	}
+	req.ParentIssueID = stringPtr(record.RootIssueID)
+
+	if req.AssigneeType != nil && *req.AssigneeType == "agent" && req.AssigneeID != nil {
+		if ok, msg := h.canAssignAgent(r.Context(), r, *req.AssigneeID, workspaceID); !ok {
+			writeError(w, http.StatusForbidden, msg)
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+
+	creatorType, actualCreatorID := h.resolveActor(r, userID, workspaceID)
+	issue, err := h.createIssueRecord(r.Context(), qtx, workspaceID, creatorType, actualCreatorID, req, issueNumber, &record.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+
+	if len(req.AttachmentIDs) > 0 {
+		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, req.AttachmentIDs)
+	}
+
+	resp := h.ideaIssueResponse(r.Context(), issue)
+	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+	if issue.AssigneeType.Valid && issue.AssigneeID.Valid && h.shouldEnqueueAgentTask(r.Context(), issue) {
+		h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
 type httptestDiscardWriter struct{}
 
-func (httptestDiscardWriter) Header() http.Header       { return http.Header{} }
-func (httptestDiscardWriter) Write([]byte) (int, error) { return 0, nil }
+func (httptestDiscardWriter) Header() http.Header        { return http.Header{} }
+func (httptestDiscardWriter) Write([]byte) (int, error)  { return 0, nil }
 func (httptestDiscardWriter) WriteHeader(statusCode int) {}

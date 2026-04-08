@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,33 +25,36 @@ const (
 )
 
 type IdeaOSConfig struct {
-	RepoURL        string `json:"repo_url"`
-	Branch         string `json:"branch"`
-	Directory      string `json:"directory"`
-	RepoVisibility string `json:"repo_visibility"`
-	GitHubToken    string `json:"-"`
+	RepoURL         string   `json:"repo_url"`
+	Branch          string   `json:"branch"`
+	Directory       string   `json:"directory"`
+	RepoVisibility  string   `json:"repo_visibility"`
+	DefaultAgentIDs []string `json:"default_agent_ids"`
+	GitHubToken     string   `json:"-"`
 }
 
 type PublicIdeaOSConfig struct {
-	RepoURL        string `json:"repo_url"`
-	Branch         string `json:"branch"`
-	Directory      string `json:"directory"`
-	RepoVisibility string `json:"repo_visibility"`
+	RepoURL         string   `json:"repo_url"`
+	Branch          string   `json:"branch"`
+	Directory       string   `json:"directory"`
+	RepoVisibility  string   `json:"repo_visibility"`
+	DefaultAgentIDs []string `json:"default_agent_ids"`
 }
 
 type IdeaSummary struct {
-	Code               string   `json:"code"`
-	Slug               string   `json:"slug"`
-	Path               string   `json:"path"`
-	Title              string   `json:"title"`
-	Summary            string   `json:"summary"`
-	Tags               []string `json:"tags"`
-	ProjectRepoName    string   `json:"project_repo_name"`
-	ProjectRepoURL     string   `json:"project_repo_url"`
-	ProjectRepoStatus  string   `json:"project_repo_status"`
-	ProvisioningError  string   `json:"provisioning_error,omitempty"`
-	CreatedAt          string   `json:"created_at"`
-	UpdatedAt          string   `json:"updated_at"`
+	Code              string   `json:"code"`
+	Slug              string   `json:"slug"`
+	Path              string   `json:"path"`
+	Title             string   `json:"title"`
+	Summary           string   `json:"summary"`
+	Tags              []string `json:"tags"`
+	ProjectRepoName   string   `json:"project_repo_name"`
+	ProjectRepoURL    string   `json:"project_repo_url"`
+	ProjectRepoStatus string   `json:"project_repo_status"`
+	ProvisioningError string   `json:"provisioning_error,omitempty"`
+	RootIssueID       string   `json:"root_issue_id,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
 }
 
 type IdeaDocument struct {
@@ -64,8 +68,12 @@ type UpdateIdeaInput struct {
 	Code              string   `json:"code"`
 	Title             string   `json:"title"`
 	Content           string   `json:"content"`
+	BaseTitle         string   `json:"base_title"`
+	BaseContent       string   `json:"base_content"`
 	Tags              []string `json:"tags"`
+	BaseTags          []string `json:"base_tags"`
 	CreatedAt         string   `json:"created_at"`
+	BaseCreatedAt     string   `json:"base_created_at"`
 	SHA               string   `json:"sha"`
 	ProjectRepoName   string   `json:"project_repo_name"`
 	ProjectRepoURL    string   `json:"project_repo_url"`
@@ -73,10 +81,11 @@ type UpdateIdeaInput struct {
 }
 
 type IdeaOSConfigUpdate struct {
-	RepoURL        string
-	Branch         string
-	Directory      string
-	RepoVisibility string
+	RepoURL         string
+	Branch          string
+	Directory       string
+	RepoVisibility  string
+	DefaultAgentIDs *[]string
 }
 
 type GitHubIdeaOSService struct {
@@ -132,6 +141,30 @@ type githubErrorResponse struct {
 	Message string `json:"message"`
 }
 
+type GitHubAPIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *GitHubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API error: %s", e.Message)
+}
+
+type IdeaConflictError struct {
+	Message string
+}
+
+func (e *IdeaConflictError) Error() string {
+	return e.Message
+}
+
+type ideaEditableState struct {
+	Title     string
+	Content   string
+	Tags      []string
+	CreatedAt string
+}
+
 func NewGitHubIdeaOSService() *GitHubIdeaOSService {
 	return &GitHubIdeaOSService{
 		BaseURL:    defaultGitHubAPIBase,
@@ -141,10 +174,11 @@ func NewGitHubIdeaOSService() *GitHubIdeaOSService {
 
 func (s *GitHubIdeaOSService) PublicConfig(cfg IdeaOSConfig) PublicIdeaOSConfig {
 	return PublicIdeaOSConfig{
-		RepoURL:        strings.TrimSpace(cfg.RepoURL),
-		Branch:         normalizeIdeaOSBranch(cfg.Branch),
-		Directory:      normalizeIdeaOSDirectory(cfg.Directory),
-		RepoVisibility: normalizeRepoVisibility(cfg.RepoVisibility),
+		RepoURL:         strings.TrimSpace(cfg.RepoURL),
+		Branch:          normalizeIdeaOSBranch(cfg.Branch),
+		Directory:       normalizeIdeaOSDirectory(cfg.Directory),
+		RepoVisibility:  normalizeRepoVisibility(cfg.RepoVisibility),
+		DefaultAgentIDs: normalizeAgentIDs(cfg.DefaultAgentIDs),
 	}
 }
 
@@ -156,10 +190,11 @@ func (s *GitHubIdeaOSService) SanitizeSettings(raw []byte) any {
 	}
 
 	idea := map[string]any{
-		"repo_url":        strings.TrimSpace(ideaCfg.RepoURL),
-		"branch":          normalizeIdeaOSBranch(ideaCfg.Branch),
-		"directory":       normalizeIdeaOSDirectory(ideaCfg.Directory),
-		"repo_visibility": normalizeRepoVisibility(ideaCfg.RepoVisibility),
+		"repo_url":          strings.TrimSpace(ideaCfg.RepoURL),
+		"branch":            normalizeIdeaOSBranch(ideaCfg.Branch),
+		"directory":         normalizeIdeaOSDirectory(ideaCfg.Directory),
+		"repo_visibility":   normalizeRepoVisibility(ideaCfg.RepoVisibility),
+		"default_agent_ids": normalizeAgentIDs(ideaCfg.DefaultAgentIDs),
 	}
 
 	if ideaCfg.RepoURL == "" {
@@ -187,6 +222,9 @@ func (s *GitHubIdeaOSService) UpdateSettings(raw []byte, update IdeaOSConfigUpda
 	if strings.TrimSpace(update.RepoVisibility) != "" {
 		merged.RepoVisibility = strings.TrimSpace(update.RepoVisibility)
 	}
+	if update.DefaultAgentIDs != nil {
+		merged.DefaultAgentIDs = normalizeAgentIDs(*update.DefaultAgentIDs)
+	}
 	if strings.TrimSpace(merged.RepoURL) != "" {
 		if _, _, err := parseGitHubRepoURL(merged.RepoURL); err != nil {
 			return nil, PublicIdeaOSConfig{}, err
@@ -194,10 +232,11 @@ func (s *GitHubIdeaOSService) UpdateSettings(raw []byte, update IdeaOSConfigUpda
 	}
 
 	ideaSettings := map[string]any{
-		"repo_url":        strings.TrimSpace(merged.RepoURL),
-		"branch":          normalizeIdeaOSBranch(merged.Branch),
-		"directory":       normalizeIdeaOSDirectory(merged.Directory),
-		"repo_visibility": normalizeRepoVisibility(merged.RepoVisibility),
+		"repo_url":          strings.TrimSpace(merged.RepoURL),
+		"branch":            normalizeIdeaOSBranch(merged.Branch),
+		"directory":         normalizeIdeaOSDirectory(merged.Directory),
+		"repo_visibility":   normalizeRepoVisibility(merged.RepoVisibility),
+		"default_agent_ids": normalizeAgentIDs(merged.DefaultAgentIDs),
 	}
 
 	if ideaSettings["repo_url"] == "" {
@@ -222,10 +261,11 @@ func IdeaOSConfigFromSettings(raw []byte) IdeaOSConfig {
 	}
 
 	return IdeaOSConfig{
-		RepoURL:        stringFromAny(ideaRaw["repo_url"]),
-		Branch:         stringFromAny(ideaRaw["branch"]),
-		Directory:      stringFromAny(ideaRaw["directory"]),
-		RepoVisibility: stringFromAny(ideaRaw["repo_visibility"]),
+		RepoURL:         stringFromAny(ideaRaw["repo_url"]),
+		Branch:          stringFromAny(ideaRaw["branch"]),
+		Directory:       stringFromAny(ideaRaw["directory"]),
+		RepoVisibility:  stringFromAny(ideaRaw["repo_visibility"]),
+		DefaultAgentIDs: stringSliceFromAny(ideaRaw["default_agent_ids"]),
 	}
 }
 
@@ -241,20 +281,38 @@ func (s *GitHubIdeaOSService) ListIdeas(ctx context.Context, cfg IdeaOSConfig) (
 
 	ideas := make([]IdeaSummary, 0, len(items))
 	for _, item := range items {
-		if item.Type != "file" || !strings.HasSuffix(strings.ToLower(item.Name), ".md") {
-			continue
-		}
+		switch {
+		case item.Type == "file" && strings.HasSuffix(strings.ToLower(item.Name), ".md"):
+			file, err := s.getFileByPath(ctx, cfg, item.Path)
+			if err != nil {
+				return nil, err
+			}
 
-		file, err := s.getFileByPath(ctx, cfg, item.Path)
-		if err != nil {
-			return nil, err
+			doc, err := ParseIdeaDocument(file.Path, file.SHA, file.Content)
+			if err != nil {
+				return nil, err
+			}
+			ideas = append(ideas, doc.IdeaSummary)
+		case item.Type == "dir":
+			nested, err := s.listDirectory(ctx, cfg, item.Path)
+			if err != nil {
+				return nil, err
+			}
+			for _, nestedItem := range nested {
+				if nestedItem.Type != "file" || !strings.HasSuffix(strings.ToLower(nestedItem.Name), ".md") {
+					continue
+				}
+				file, err := s.getFileByPath(ctx, cfg, nestedItem.Path)
+				if err != nil {
+					return nil, err
+				}
+				doc, err := ParseIdeaDocument(file.Path, file.SHA, file.Content)
+				if err != nil {
+					return nil, err
+				}
+				ideas = append(ideas, doc.IdeaSummary)
+			}
 		}
-
-		doc, err := ParseIdeaDocument(file.Path, file.SHA, file.Content)
-		if err != nil {
-			return nil, err
-		}
-		ideas = append(ideas, doc.IdeaSummary)
 	}
 
 	sort.SliceStable(ideas, func(i, j int) bool {
@@ -339,29 +397,101 @@ func (s *GitHubIdeaOSService) UpdateIdea(ctx context.Context, cfg IdeaOSConfig, 
 		title = prettifyIdeaSlug(slug)
 	}
 
-	doc := IdeaDocument{
+	baseTitle := strings.TrimSpace(input.BaseTitle)
+	if baseTitle == "" {
+		baseTitle = title
+	}
+	baseCreatedAt := normalizeIdeaDate(input.BaseCreatedAt)
+	if baseCreatedAt == "" {
+		baseCreatedAt = normalizeIdeaDate(input.CreatedAt)
+	}
+	baseTags := normalizeTags(input.BaseTags)
+	if len(baseTags) == 0 && len(input.BaseTags) == 0 {
+		baseTags = normalizeTags(input.Tags)
+	}
+	baseContent := input.BaseContent
+	if baseContent == "" {
+		baseContent = input.Content
+	}
+
+	desired := IdeaDocument{
 		IdeaSummary: IdeaSummary{
-			Slug:      slug,
-			Path:      ideaPath(cfg, slug),
-			Title:     title,
-			Tags:      normalizeTags(input.Tags),
-			CreatedAt: normalizeIdeaDate(input.CreatedAt),
+			Code:              strings.TrimSpace(input.Code),
+			Slug:              slug,
+			Path:              ideaPath(cfg, slug),
+			Title:             title,
+			Tags:              normalizeTags(input.Tags),
+			ProjectRepoName:   strings.TrimSpace(input.ProjectRepoName),
+			ProjectRepoURL:    strings.TrimSpace(input.ProjectRepoURL),
+			ProjectRepoStatus: defaultIfEmpty(strings.TrimSpace(input.ProjectRepoStatus), "creating"),
+			CreatedAt:         normalizeIdeaDate(input.CreatedAt),
 		},
-		Content: input.Content,
+		Content: stripManagedProjectRepoSection(input.Content),
 		SHA:     strings.TrimSpace(input.SHA),
 	}
 
-	rendered, err := RenderIdeaDocument(doc)
+	base := IdeaDocument{
+		IdeaSummary: IdeaSummary{
+			Code:              desired.Code,
+			Slug:              slug,
+			Path:              desired.Path,
+			Title:             baseTitle,
+			Tags:              baseTags,
+			ProjectRepoName:   desired.ProjectRepoName,
+			ProjectRepoURL:    desired.ProjectRepoURL,
+			ProjectRepoStatus: desired.ProjectRepoStatus,
+			CreatedAt:         baseCreatedAt,
+		},
+		Content: stripManagedProjectRepoSection(baseContent),
+		SHA:     strings.TrimSpace(input.SHA),
+	}
+
+	return s.updateIdeaDocument(ctx, cfg, desired, base, fmt.Sprintf("update idea: %s", slug))
+}
+
+func (s *GitHubIdeaOSService) updateIdeaDocument(ctx context.Context, cfg IdeaOSConfig, desired, base IdeaDocument, message string) (IdeaDocument, error) {
+	rendered, err := RenderIdeaDocument(desired)
 	if err != nil {
 		return IdeaDocument{}, err
 	}
 
-	putResp, err := s.putFile(ctx, cfg, doc.Path, rendered, doc.SHA, fmt.Sprintf("update idea: %s", slug))
-	if err != nil {
-		return IdeaDocument{}, err
+	sha := strings.TrimSpace(desired.SHA)
+	for attempt := 0; attempt < 3; attempt++ {
+		putResp, err := s.putFile(ctx, cfg, desired.Path, rendered, sha, message)
+		if err == nil {
+			return ParseIdeaDocument(putResp.Content.Path, putResp.Content.SHA, rendered)
+		}
+		if !isGitHubSHAMismatch(err) {
+			return IdeaDocument{}, err
+		}
+
+		latestContent, latestSHA, latestErr := s.GetMarkdownFile(ctx, cfg, desired.Path)
+		if latestErr != nil {
+			return IdeaDocument{}, latestErr
+		}
+		latest, latestErr := ParseIdeaDocument(desired.Path, latestSHA, latestContent)
+		if latestErr != nil {
+			return IdeaDocument{}, latestErr
+		}
+		if !sameIdeaEditableState(ideaEditableStateFromDoc(latest), ideaEditableStateFromDoc(base)) {
+			return IdeaDocument{}, &IdeaConflictError{
+				Message: "idea changed on GitHub; reload the page and merge the latest version before saving again",
+			}
+		}
+
+		desired.ProjectRepoURL = latest.ProjectRepoURL
+		desired.ProjectRepoStatus = latest.ProjectRepoStatus
+		desired.UpdatedAt = latest.UpdatedAt
+		rendered, err = RenderIdeaDocument(desired)
+		if err != nil {
+			return IdeaDocument{}, err
+		}
+		sha = latestSHA
 	}
 
-	return ParseIdeaDocument(putResp.Content.Path, putResp.Content.SHA, rendered)
+	return IdeaDocument{}, &IdeaConflictError{
+		Message: "idea changed on GitHub too frequently; reload the page and try again",
+	}
 }
 
 func ParseIdeaDocument(filePath, sha, markdown string) (IdeaDocument, error) {
@@ -402,16 +532,16 @@ func ParseIdeaDocument(filePath, sha, markdown string) (IdeaDocument, error) {
 
 	return IdeaDocument{
 		IdeaSummary: IdeaSummary{
-			Code:      strings.TrimSpace(fm.Code),
-			Slug:      slug,
-			Path:      filePath,
-			Title:     title,
-			Summary:   summary,
-			Tags:      tags,
+			Code:              strings.TrimSpace(fm.Code),
+			Slug:              slug,
+			Path:              filePath,
+			Title:             title,
+			Summary:           summary,
+			Tags:              tags,
 			ProjectRepoURL:    strings.TrimSpace(fm.ProjectRepo),
 			ProjectRepoStatus: defaultIfEmpty(strings.TrimSpace(fm.ProjectRepoStatus), "creating"),
-			CreatedAt: created,
-			UpdatedAt: updated,
+			CreatedAt:         created,
+			UpdatedAt:         updated,
 		},
 		Content: normalizeIdeaBody(body),
 		SHA:     sha,
@@ -524,12 +654,12 @@ func (s *GitHubIdeaOSService) PutMarkdownFile(ctx context.Context, cfg IdeaOSCon
 	return resp.Content.SHA, nil
 }
 
-func (s *GitHubIdeaOSService) CreatePrivateRepository(ctx context.Context, token, repoName string) (GitHubRepository, error) {
+func (s *GitHubIdeaOSService) CreateRepository(ctx context.Context, token, repoName, visibility string) (GitHubRepository, error) {
 	reqBody := map[string]any{
-		"name":         strings.TrimSpace(repoName),
-		"private":      true,
-		"auto_init":    true,
-		"description":  "Project repository provisioned by GitHub IdeaOS",
+		"name":        strings.TrimSpace(repoName),
+		"private":     normalizeRepoVisibility(visibility) != "public",
+		"auto_init":   true,
+		"description": "Project repository provisioned by GitHub IdeaOS",
 	}
 	var resp GitHubRepository
 	if err := s.doJSON(ctx, http.MethodPost, strings.TrimRight(s.BaseURL, "/")+"/user/repos", token, reqBody, &resp); err != nil {
@@ -587,7 +717,10 @@ func (s *GitHubIdeaOSService) doJSON(ctx context.Context, method, rawURL, token 
 		if ghErr.Message == "" {
 			ghErr.Message = resp.Status
 		}
-		return fmt.Errorf("GitHub API error: %s", ghErr.Message)
+		return &GitHubAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    ghErr.Message,
+		}
 	}
 
 	if out == nil {
@@ -662,6 +795,94 @@ func normalizeIdeaBody(body string) string {
 	return body + "\n"
 }
 
+func stripManagedProjectRepoSection(body string) string {
+	normalized := normalizeIdeaBody(body)
+	trimmed := strings.TrimSuffix(normalized, "\n")
+
+	switch {
+	case strings.HasPrefix(trimmed, "# Project Repo\n\n"):
+		if isManagedProjectRepoSection(trimmed) {
+			return "# Notes\n"
+		}
+	default:
+		idx := strings.LastIndex(trimmed, "\n\n# Project Repo\n\n")
+		if idx == -1 {
+			return normalized
+		}
+		section := trimmed[idx+2:]
+		if !isManagedProjectRepoSection(section) {
+			return normalized
+		}
+		return normalizeIdeaBody(trimmed[:idx])
+	}
+
+	return normalized
+}
+
+func isManagedProjectRepoSection(section string) bool {
+	lines := strings.Split(section, "\n")
+	if len(lines) < 3 {
+		return false
+	}
+	if lines[0] != "# Project Repo" || lines[1] != "" {
+		return false
+	}
+
+	idx := 2
+	if strings.HasPrefix(lines[idx], "- Repository: ") {
+		if strings.TrimSpace(strings.TrimPrefix(lines[idx], "- Repository: ")) == "" {
+			return false
+		}
+		idx++
+	}
+	if idx >= len(lines) {
+		return false
+	}
+	if !strings.HasPrefix(lines[idx], "- Status: ") {
+		return false
+	}
+	if strings.TrimSpace(strings.TrimPrefix(lines[idx], "- Status: ")) == "" {
+		return false
+	}
+	return idx == len(lines)-1
+}
+
+func ideaEditableStateFromDoc(doc IdeaDocument) ideaEditableState {
+	return ideaEditableState{
+		Title:     strings.TrimSpace(doc.Title),
+		Content:   stripManagedProjectRepoSection(doc.Content),
+		Tags:      normalizeTags(doc.Tags),
+		CreatedAt: normalizeIdeaDate(doc.CreatedAt),
+	}
+}
+
+func sameIdeaEditableState(left, right ideaEditableState) bool {
+	if left.Title != right.Title || left.Content != right.Content || left.CreatedAt != right.CreatedAt {
+		return false
+	}
+	if len(left.Tags) != len(right.Tags) {
+		return false
+	}
+	for idx := range left.Tags {
+		if left.Tags[idx] != right.Tags[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func isGitHubSHAMismatch(err error) bool {
+	var ghErr *GitHubAPIError
+	if !errors.As(err, &ghErr) {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(ghErr.Message))
+	if strings.Contains(message, "does not match") {
+		return true
+	}
+	return ghErr.StatusCode == http.StatusConflict && strings.Contains(message, "sha")
+}
+
 func normalizeIdeaDate(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -702,15 +923,15 @@ func inferIdeaTags(title, body string) []string {
 	}
 
 	keywords := map[string][]string{
-		"ai":          {" ai", "llm", "model", "gpt", "anthropic", "openai"},
-		"agent":       {"agent", "agents"},
-		"github":      {"github", "git "},
-		"devtools":    {"developer tool", "devtool", "pr review", "repo", "codebase"},
-		"code-review": {"review", "pull request", "pr "},
+		"ai":           {" ai", "llm", "model", "gpt", "anthropic", "openai"},
+		"agent":        {"agent", "agents"},
+		"github":       {"github", "git "},
+		"devtools":     {"developer tool", "devtool", "pr review", "repo", "codebase"},
+		"code-review":  {"review", "pull request", "pr "},
 		"architecture": {"architecture", "system design", "infra", "design"},
-		"startup":     {"startup", "founder", "saas", "business", "market"},
-		"product":     {"product", "roadmap", "ux", "feature"},
-		"mobile":      {"ios", "android", "mobile", "flutter"},
+		"startup":      {"startup", "founder", "saas", "business", "market"},
+		"product":      {"product", "roadmap", "ux", "feature"},
+		"mobile":       {"ios", "android", "mobile", "flutter"},
 	}
 
 	for tag, terms := range keywords {
@@ -824,6 +1045,48 @@ func decodeSettings(raw []byte) map[string]any {
 func stringFromAny(v any) string {
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
+}
+
+func stringSliceFromAny(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return []string{}
+	}
+
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		value := stringFromAny(item)
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	return normalizeAgentIDs(values)
+}
+
+func normalizeAgentIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]struct{}, len(ids))
+	normalized := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+
+	if len(normalized) == 0 {
+		return []string{}
+	}
+	return normalized
 }
 
 func normalizeRepoVisibility(value string) string {

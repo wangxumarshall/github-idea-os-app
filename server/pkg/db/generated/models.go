@@ -138,6 +138,60 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GithubAccount struct {
+	ID                   pgtype.UUID        `json:"id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	GithubUserID         int64              `json:"github_user_id"`
+	Login                string             `json:"login"`
+	AvatarUrl            pgtype.Text        `json:"avatar_url"`
+	ProfileUrl           pgtype.Text        `json:"profile_url"`
+	AccessTokenEncrypted string             `json:"access_token_encrypted"`
+	TokenType            string             `json:"token_type"`
+	Scope                string             `json:"scope"`
+	NextIdeaSeq          int32              `json:"next_idea_seq"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Idea struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	GithubAccountID   pgtype.UUID        `json:"github_account_id"`
+	SeqNo             int32              `json:"seq_no"`
+	Code              string             `json:"code"`
+	SlugSuffix        string             `json:"slug_suffix"`
+	SlugFull          string             `json:"slug_full"`
+	Title             string             `json:"title"`
+	RawInput          string             `json:"raw_input"`
+	Summary           string             `json:"summary"`
+	Tags              []byte             `json:"tags"`
+	IdeaPath          string             `json:"idea_path"`
+	MarkdownSha       pgtype.Text        `json:"markdown_sha"`
+	ProjectRepoName   string             `json:"project_repo_name"`
+	ProjectRepoUrl    string             `json:"project_repo_url"`
+	ProjectRepoStatus string             `json:"project_repo_status"`
+	ProvisioningError pgtype.Text        `json:"provisioning_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	RootIssueID       pgtype.UUID        `json:"root_issue_id"`
+}
+
+type IdeaJob struct {
+	ID          pgtype.UUID        `json:"id"`
+	IdeaID      pgtype.UUID        `json:"idea_id"`
+	JobType     string             `json:"job_type"`
+	Status      string             `json:"status"`
+	Attempts    int32              `json:"attempts"`
+	Payload     []byte             `json:"payload"`
+	LastError   pgtype.Text        `json:"last_error"`
+	RunAfter    pgtype.Timestamptz `json:"run_after"`
+	LockedAt    pgtype.Timestamptz `json:"locked_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -175,6 +229,8 @@ type Issue struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
+	RepoUrl            pgtype.Text        `json:"repo_url"`
+	IdeaID             pgtype.UUID        `json:"idea_id"`
 }
 
 type IssueDependency struct {

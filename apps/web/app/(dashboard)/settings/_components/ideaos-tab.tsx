@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderGit2, KeyRound, Save, Sparkles } from "lucide-react";
+import { FolderGit2, Link2, Save, Sparkles, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { api } from "@/shared/api";
@@ -17,20 +19,27 @@ const defaultConfig: IdeaOSConfig = {
   repo_url: "",
   branch: "main",
   directory: "ideas",
-  token_configured: false,
+  repo_visibility: "private",
+  default_agent_ids: [],
+  github_connected: false,
+  github_login: null,
 };
 
 export function IdeaOSTab() {
+  const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const members = useWorkspaceStore((s) => s.members);
+  const agents = useWorkspaceStore((s) => s.agents);
   const [config, setConfig] = useState<IdeaOSConfig>(defaultConfig);
-  const [githubToken, setGitHubToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const availableAgents = agents.filter((agent) => !agent.archived_at);
 
   useEffect(() => {
     if (!workspace) return;
@@ -42,7 +51,6 @@ export function IdeaOSTab() {
         const nextConfig = await api.getIdeaOSConfig();
         if (!cancelled) {
           setConfig(nextConfig);
-          setGitHubToken("");
         }
       } catch (error) {
         if (!cancelled) {
@@ -61,6 +69,15 @@ export function IdeaOSTab() {
     };
   }, [workspace]);
 
+  useEffect(() => {
+    const githubStatus = searchParams.get("github");
+    if (githubStatus === "connected") {
+      toast.success("GitHub connected");
+    } else if (githubStatus === "error") {
+      toast.error("GitHub connection failed");
+    }
+  }, [searchParams]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -68,10 +85,10 @@ export function IdeaOSTab() {
         repo_url: config.repo_url,
         branch: config.branch,
         directory: config.directory,
-        ...(githubToken.trim() ? { github_token: githubToken.trim() } : {}),
+        repo_visibility: config.repo_visibility,
+        default_agent_ids: config.default_agent_ids,
       });
       setConfig(nextConfig);
-      setGitHubToken("");
       toast.success("IdeaOS settings saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save IdeaOS settings");
@@ -80,7 +97,41 @@ export function IdeaOSTab() {
     }
   };
 
+  const handleConnectGitHub = async () => {
+    setConnecting(true);
+    try {
+      const resp = await api.startGitHubOAuth("/settings?tab=ideas&github=connected");
+      window.location.href = resp.authorize_url;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start GitHub OAuth");
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnectGitHub = async () => {
+    setDisconnecting(true);
+    try {
+      await api.disconnectGitHubAccount();
+      const nextConfig = await api.getIdeaOSConfig();
+      setConfig(nextConfig);
+      toast.success("GitHub disconnected");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect GitHub");
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   if (!workspace) return null;
+
+  const toggleDefaultAgent = (agentId: string) => {
+    setConfig((current) => ({
+      ...current,
+      default_agent_ids: current.default_agent_ids.includes(agentId)
+        ? current.default_agent_ids.filter((id) => id !== agentId)
+        : [...current.default_agent_ids, agentId],
+    }));
+  };
 
   return (
     <div className="space-y-8">
@@ -101,7 +152,39 @@ export function IdeaOSTab() {
         <Card>
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
-              The MVP stores every idea as a markdown file inside a single GitHub directory, usually <code>ideas/</code>. Autosave in the editor writes directly through the GitHub Contents API.
+              Every idea is stored as <code>ideas/idea0001-name/idea0001-name.md</code>. The app writes markdown updates to your Ideas repository and provisions a matching private project repository in your GitHub account.
+            </div>
+
+            <div className="rounded-xl border border-border/60 bg-background/60 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <FolderGit2 className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-medium">GitHub account</p>
+                    <Badge variant={config.github_connected ? "secondary" : "outline"} className="rounded-full">
+                      {config.github_connected ? "Connected" : "Not connected"}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {config.github_connected && config.github_login
+                      ? `Connected as ${config.github_login}. New project repositories will be created in this account.`
+                      : "Connect GitHub before creating ideas or provisioning repositories."}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {config.github_connected ? (
+                    <Button variant="outline" size="sm" onClick={handleDisconnectGitHub} disabled={!canManageWorkspace || disconnecting || loading}>
+                      <Unplug className="h-3.5 w-3.5" />
+                      {disconnecting ? "Disconnecting..." : "Disconnect"}
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={handleConnectGitHub} disabled={!canManageWorkspace || connecting || loading}>
+                      <Link2 className="h-3.5 w-3.5" />
+                      {connecting ? "Connecting..." : "Connect GitHub"}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -143,24 +226,54 @@ export function IdeaOSTab() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="ideaos-token" className="text-xs text-muted-foreground">GitHub token</Label>
-              <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="ideaos-token"
-                  type="password"
-                  value={githubToken}
-                  onChange={(event) => setGitHubToken(event.target.value)}
-                  disabled={!canManageWorkspace || loading}
-                  placeholder={config.token_configured ? "Token already configured. Enter a new one to rotate." : "ghp_..."}
-                  className="pl-9"
-                />
+              <Label htmlFor="ideaos-visibility" className="text-xs text-muted-foreground">Project repository visibility</Label>
+              <div className="flex gap-2">
+                {(["private", "public"] as const).map((visibility) => (
+                  <Button
+                    key={visibility}
+                    type="button"
+                    size="sm"
+                    variant={config.repo_visibility === visibility ? "default" : "outline"}
+                    disabled={!canManageWorkspace || loading}
+                    onClick={() => setConfig((current) => ({ ...current, repo_visibility: visibility }))}
+                  >
+                    {visibility}
+                  </Button>
+                ))}
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant={config.token_configured ? "secondary" : "outline"} className="rounded-full">
-                  {config.token_configured ? "Token configured" : "No token"}
-                </Badge>
-                The token is stored server-side and never returned to the browser after save.
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Default idea agents</Label>
+                <p className="text-sm text-muted-foreground">
+                  When selected, the first valid agent in this list will be assigned to the root issue created for a new idea. If none are selected, the app only creates the issue and does not auto-dispatch work.
+                </p>
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-border/60 bg-background/40 p-3">
+                {availableAgents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No active agents available in this workspace.</p>
+                ) : (
+                  availableAgents.map((agent) => {
+                    const checked = config.default_agent_ids.includes(agent.id);
+                    return (
+                      <label key={agent.id} className="flex items-start gap-3 rounded-lg px-2 py-2 text-sm hover:bg-accent/30">
+                        <Checkbox
+                          checked={checked}
+                          disabled={!canManageWorkspace || loading}
+                          onCheckedChange={() => toggleDefaultAgent(agent.id)}
+                        />
+                        <div className="space-y-1">
+                          <div className="font-medium">{agent.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {agent.description || "No description"}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
               </div>
             </div>
 

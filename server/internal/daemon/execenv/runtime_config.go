@@ -46,6 +46,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
+	b.WriteString("- `multica idea get <slug> --output json` — Get full idea details when an issue belongs to an idea\n")
 	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] --output json` — List issues in workspace\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--limit N] [--offset N] [--since <RFC3339>] --output json` — List comments on an issue (supports pagination; includes id, parent_id for threading)\n")
 	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
@@ -60,20 +61,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
 
 	// Inject available repositories section.
-	if len(ctx.Repos) > 0 {
+	if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {
 		b.WriteString("## Repositories\n\n")
-		b.WriteString("The following code repositories are available in this workspace.\n")
+		b.WriteString("The following code repositories are available for this task.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
-		for _, repo := range ctx.Repos {
-			desc := repo.Description
-			if desc == "" {
-				desc = "—"
+		if ctx.SelectedRepoURL != "" {
+			b.WriteString("**Preferred repository for this issue**\n\n")
+			fmt.Fprintf(&b, "- URL: %s\n", ctx.SelectedRepoURL)
+			if ctx.SelectedRepoDescription != "" {
+				fmt.Fprintf(&b, "- Description: %s\n", ctx.SelectedRepoDescription)
 			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			b.WriteString("\n")
 		}
-		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+		if len(ctx.Repos) > 0 {
+			b.WriteString("| URL | Description |\n")
+			b.WriteString("|-----|-------------|\n")
+			for _, repo := range ctx.Repos {
+				desc := repo.Description
+				if desc == "" {
+					desc = "—"
+				}
+				fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("The checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
 	}
 
 	b.WriteString("### Workflow\n\n")
@@ -82,21 +94,43 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		if ctx.IdeaSlug != "" {
+			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` to load the full idea context\n", ctx.IdeaSlug)
+			fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		} else {
+			fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		}
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
-		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
-		fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-		b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
-		b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		if ctx.IdeaSlug != "" {
+			fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
+			fmt.Fprintf(&b, "5. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+			b.WriteString("6. If the comment requests code changes or further work, do the work first, then reply with your results\n")
+			b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		} else {
+			fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
+			fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+			b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
+			b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		}
 	} else {
 		// Assignment-triggered: full workflow
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("3. Read comments for additional context or human instructions\n")
-		b.WriteString("4. If the task requires code changes:\n")
-		if len(ctx.Repos) > 0 {
-			b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
+		if ctx.IdeaSlug != "" {
+			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", ctx.IdeaSlug)
+			fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+			b.WriteString("4. Read comments for additional context or human instructions\n")
+		} else {
+			fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+			b.WriteString("3. Read comments for additional context or human instructions\n")
+		}
+		b.WriteString("5. If the task requires code changes:\n")
+		if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {
+			if ctx.SelectedRepoURL != "" {
+				fmt.Fprintf(&b, "   a. Run `multica repo checkout %s`\n", ctx.SelectedRepoURL)
+			} else {
+				b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
+			}
 			b.WriteString("   b. `cd` into the checked-out directory\n")
 			b.WriteString("   c. Implement the changes and commit\n")
 		} else {
@@ -106,9 +140,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("   c. Push the branch to the remote\n")
 		b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
 		fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
-		b.WriteString("5. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
-		fmt.Fprintf(&b, "6. Run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		b.WriteString("6. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
+		fmt.Fprintf(&b, "7. Run `multica issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "8. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
 	if len(ctx.AgentSkills) > 0 {

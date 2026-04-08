@@ -34,6 +34,15 @@ export interface Issue {
   creator_type: IssueAssigneeType;
   creator_id: string;
   parent_issue_id: string | null;
+  repo_url?: string | null;
+  idea_id?: string | null;
+  idea_slug?: string | null;
+  idea_code?: string | null;
+  idea_title?: string | null;
+  idea_root_issue_id?: string | null;
+  idea_root_identifier?: string | null;
+  idea_root_title?: string | null;
+  is_idea_root?: boolean;
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];

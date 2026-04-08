@@ -249,10 +249,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Include workspace ID and repos so the daemon can set up worktrees.
 	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+		if issue.RepoUrl.Valid {
+			resp.SelectedRepoURL = issue.RepoUrl.String
+		}
 		if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
 			var repos []RepoData
 			if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 				resp.Repos = repos
+				for _, repo := range repos {
+					if repo.URL == issue.RepoUrl.String {
+						resp.SelectedRepoDescription = repo.Description
+						break
+					}
+				}
+			}
+		}
+		if issue.IdeaID.Valid {
+			if idea, err := h.IdeaStore.GetIdeaByID(r.Context(), h.DB, uuidToString(issue.IdeaID)); err == nil {
+				resp.IdeaSlug = idea.SlugFull
+				resp.IdeaCode = idea.Code
+				resp.IdeaTitle = idea.Title
+				if resp.SelectedRepoURL == "" {
+					resp.SelectedRepoURL = idea.ProjectRepoURL
+					resp.SelectedRepoDescription = "Idea project repository"
+				}
 			}
 		}
 	}

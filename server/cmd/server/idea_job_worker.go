@@ -62,7 +62,16 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 		return
 	}
 
-	repo, err := gh.CreatePrivateRepository(ctx, token, idea.ProjectRepoName)
+	workspace, err := queries.GetWorkspace(ctx, util.ParseUUID(idea.WorkspaceID))
+	if err != nil {
+		_ = store.MarkJobFailed(ctx, pool, job.ID, "workspace not found")
+		_ = store.UpdateIdeaRepoState(ctx, pool, idea.ID, idea.ProjectRepoURL, "failed", "workspace not found")
+		return
+	}
+	cfg := service.IdeaOSConfigFromSettings(workspace.Settings)
+	cfg.GitHubToken = token
+
+	repo, err := gh.CreateRepository(ctx, token, idea.ProjectRepoName, cfg.RepoVisibility)
 	if err != nil {
 		message := err.Error()
 		if strings.Contains(strings.ToLower(message), "name already exists") {
@@ -96,9 +105,53 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 	if err := syncIdeaRepoStatus(ctx, queries, gh, oauth, pool, idea, "ready", repo.HTMLURL, ""); err != nil {
 		slog.Warn("idea job worker: sync markdown status failed", "idea_id", idea.ID, "error", err)
 	}
+	if err := enqueueIdeaRootIssueIfReady(ctx, queries, idea); err != nil {
+		slog.Warn("idea job worker: enqueue root issue failed", "idea_id", idea.ID, "error", err)
+	}
 	if err := store.MarkJobCompleted(ctx, pool, job.ID); err != nil {
 		slog.Warn("idea job worker: mark completed failed", "job_id", job.ID, "error", err)
 	}
+}
+
+func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea *service.IdeaRecord) error {
+	if idea.RootIssueID == "" {
+		return nil
+	}
+
+	issue, err := queries.GetIssue(ctx, util.ParseUUID(idea.RootIssueID))
+	if err != nil {
+		return err
+	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		return nil
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return nil
+	}
+
+	agent, err := queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil {
+		return err
+	}
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return nil
+	}
+
+	existingTasks, err := queries.ListTasksByIssue(ctx, issue.ID)
+	if err != nil {
+		return err
+	}
+	if len(existingTasks) > 0 {
+		return nil
+	}
+
+	_, err = queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:   issue.AssigneeID,
+		RuntimeID: agent.RuntimeID,
+		IssueID:   issue.ID,
+		Priority:  priorityToQueueValue(issue.Priority),
+	})
+	return err
 }
 
 func syncIdeaRepoStatus(ctx context.Context, queries *db.Queries, gh *service.GitHubIdeaOSService, oauth *service.GitHubOAuthService, pool db.DBTX, idea *service.IdeaRecord, status, repoURL, reason string) error {
@@ -140,4 +193,19 @@ func syncIdeaRepoStatus(ctx context.Context, queries *db.Queries, gh *service.Gi
 		return err
 	}
 	return service.NewIdeaStore().UpdateIdeaContent(ctx, pool, idea.ID, doc.Title, doc.Summary, newSHA, doc.Tags, status, reason)
+}
+
+func priorityToQueueValue(priority string) int32 {
+	switch priority {
+	case "urgent":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,10 +15,11 @@ func TestIdeaOSSettingsRoundTrip(t *testing.T) {
 	svc := NewGitHubIdeaOSService()
 
 	raw, publicCfg, err := svc.UpdateSettings(nil, IdeaOSConfigUpdate{
-		RepoURL:        "https://github.com/example/ideas",
-		Branch:         "main",
-		Directory:      "ideas",
-		RepoVisibility: "private",
+		RepoURL:         "https://github.com/example/ideas",
+		Branch:          "main",
+		Directory:       "ideas",
+		RepoVisibility:  "private",
+		DefaultAgentIDs: &[]string{"agent-1", "agent-2"},
 	})
 	if err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
@@ -26,10 +28,16 @@ func TestIdeaOSSettingsRoundTrip(t *testing.T) {
 	if publicCfg.RepoVisibility != "private" {
 		t.Fatalf("expected repo visibility private, got %q", publicCfg.RepoVisibility)
 	}
+	if len(publicCfg.DefaultAgentIDs) != 2 || publicCfg.DefaultAgentIDs[0] != "agent-1" || publicCfg.DefaultAgentIDs[1] != "agent-2" {
+		t.Fatalf("expected default agent IDs to round-trip, got %#v", publicCfg.DefaultAgentIDs)
+	}
 
 	cfg := IdeaOSConfigFromSettings(raw)
 	if cfg.RepoURL != "https://github.com/example/ideas" {
 		t.Fatalf("expected repo URL to round-trip, got %q", cfg.RepoURL)
+	}
+	if len(cfg.DefaultAgentIDs) != 2 || cfg.DefaultAgentIDs[0] != "agent-1" || cfg.DefaultAgentIDs[1] != "agent-2" {
+		t.Fatalf("expected default agent IDs in config, got %#v", cfg.DefaultAgentIDs)
 	}
 
 	sanitized := svc.SanitizeSettings(raw)
@@ -46,6 +54,10 @@ func TestIdeaOSSettingsRoundTrip(t *testing.T) {
 	}
 	if idea["repo_visibility"] != "private" {
 		t.Fatalf("expected repo_visibility=private, got %#v", idea["repo_visibility"])
+	}
+	defaultAgentIDs, ok := idea["default_agent_ids"].([]string)
+	if !ok || len(defaultAgentIDs) != 2 {
+		t.Fatalf("expected sanitized default_agent_ids, got %#v", idea["default_agent_ids"])
 	}
 }
 
@@ -89,10 +101,10 @@ func TestRenderAndParseIdeaDocument(t *testing.T) {
 
 func TestGitHubIdeaOSServiceCRUD(t *testing.T) {
 	files := map[string]string{
-		"ideas/repo-brain.md": frontmatterFixture("Repo Brain", "2026-04-01", "2026-04-07", []string{"github", "devtools"}, "# Notes\n\nTrack repository knowledge."),
+		"ideas/repo-brain/repo-brain.md": frontmatterFixture("Repo Brain", "2026-04-01", "2026-04-07", []string{"github", "devtools"}, "# Notes\n\nTrack repository knowledge."),
 	}
 	shas := map[string]string{
-		"ideas/repo-brain.md": "sha-repo-brain",
+		"ideas/repo-brain/repo-brain.md": "sha-repo-brain",
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,51 +116,55 @@ func TestGitHubIdeaOSServiceCRUD(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas"):
 			writeJSONFixture(w, []map[string]any{
-				{"name": "repo-brain.md", "path": "ideas/repo-brain.md", "type": "file", "sha": shas["ideas/repo-brain.md"]},
+				{"name": "repo-brain", "path": "ideas/repo-brain", "type": "dir", "sha": "sha-dir"},
 			})
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas/repo-brain.md"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas/repo-brain"):
+			writeJSONFixture(w, []map[string]any{
+				{"name": "repo-brain.md", "path": "ideas/repo-brain/repo-brain.md", "type": "file", "sha": shas["ideas/repo-brain/repo-brain.md"]},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas/repo-brain/repo-brain.md"):
 			writeJSONFixture(w, map[string]any{
 				"name":     "repo-brain.md",
-				"path":     "ideas/repo-brain.md",
-				"sha":      shas["ideas/repo-brain.md"],
+				"path":     "ideas/repo-brain/repo-brain.md",
+				"sha":      shas["ideas/repo-brain/repo-brain.md"],
 				"encoding": "base64",
-				"content":  base64.StdEncoding.EncodeToString([]byte(files["ideas/repo-brain.md"])),
+				"content":  base64.StdEncoding.EncodeToString([]byte(files["ideas/repo-brain/repo-brain.md"])),
 			})
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/ideas/new-idea.md"):
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/ideas/new-idea/new-idea.md"):
 			var req githubPutContentRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode create request: %v", err)
 			}
 			content, _ := base64.StdEncoding.DecodeString(req.Content)
-			files["ideas/new-idea.md"] = string(content)
-			shas["ideas/new-idea.md"] = "sha-new"
+			files["ideas/new-idea/new-idea.md"] = string(content)
+			shas["ideas/new-idea/new-idea.md"] = "sha-new"
 			writeJSONFixture(w, map[string]any{
 				"content": map[string]any{
 					"name": "new-idea.md",
-					"path": "ideas/new-idea.md",
+					"path": "ideas/new-idea/new-idea.md",
 					"sha":  "sha-new",
 				},
 			})
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas/new-idea.md"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/ideas/new-idea/new-idea.md"):
 			writeJSONFixture(w, map[string]any{
 				"name":     "new-idea.md",
-				"path":     "ideas/new-idea.md",
-				"sha":      shas["ideas/new-idea.md"],
+				"path":     "ideas/new-idea/new-idea.md",
+				"sha":      shas["ideas/new-idea/new-idea.md"],
 				"encoding": "base64",
-				"content":  base64.StdEncoding.EncodeToString([]byte(files["ideas/new-idea.md"])),
+				"content":  base64.StdEncoding.EncodeToString([]byte(files["ideas/new-idea/new-idea.md"])),
 			})
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/ideas/repo-brain.md"):
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/ideas/repo-brain/repo-brain.md"):
 			var req githubPutContentRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode update request: %v", err)
 			}
 			content, _ := base64.StdEncoding.DecodeString(req.Content)
-			files["ideas/repo-brain.md"] = string(content)
-			shas["ideas/repo-brain.md"] = "sha-updated"
+			files["ideas/repo-brain/repo-brain.md"] = string(content)
+			shas["ideas/repo-brain/repo-brain.md"] = "sha-updated"
 			writeJSONFixture(w, map[string]any{
 				"content": map[string]any{
 					"name": "repo-brain.md",
-					"path": "ideas/repo-brain.md",
+					"path": "ideas/repo-brain/repo-brain.md",
 					"sha":  "sha-updated",
 				},
 			})
@@ -188,11 +204,16 @@ func TestGitHubIdeaOSServiceCRUD(t *testing.T) {
 	}
 
 	updated, err := svc.UpdateIdea(context.Background(), cfg, UpdateIdeaInput{
-		Slug:      "repo-brain",
-		Title:     "Repo Brain",
-		Content:   "# Notes\n\nUpdated content.",
-		CreatedAt: "2026-04-01",
-		SHA:       "sha-repo-brain",
+		Slug:          "repo-brain",
+		Title:         "Repo Brain",
+		Content:       "# Notes\n\nUpdated content.",
+		BaseTitle:     "Repo Brain",
+		BaseContent:   "# Notes\n\nTrack repository knowledge.\n\n# Project Repo\n\n- Status: creating\n",
+		Tags:          []string{"github", "devtools"},
+		BaseTags:      []string{"github", "devtools"},
+		CreatedAt:     "2026-04-01",
+		BaseCreatedAt: "2026-04-01",
+		SHA:           "sha-repo-brain",
 	})
 	if err != nil {
 		t.Fatalf("UpdateIdea: %v", err)
@@ -202,6 +223,224 @@ func TestGitHubIdeaOSServiceCRUD(t *testing.T) {
 	}
 	if !strings.Contains(updated.Content, "Updated content.") {
 		t.Fatalf("expected updated content, got %q", updated.Content)
+	}
+}
+
+func TestGitHubIdeaOSServiceUpdateIdeaRetriesManagedRepoConflict(t *testing.T) {
+	const filePath = "ideas/repo-brain/repo-brain.md"
+
+	baseDoc := IdeaDocument{
+		IdeaSummary: IdeaSummary{
+			Code:              "idea0001",
+			Slug:              "repo-brain",
+			Title:             "Repo Brain",
+			CreatedAt:         "2026-04-01",
+			ProjectRepoStatus: "creating",
+		},
+		Content: "# Notes\n\nInitial content.",
+	}
+	baseMarkdown, err := RenderIdeaDocument(baseDoc)
+	if err != nil {
+		t.Fatalf("RenderIdeaDocument(base): %v", err)
+	}
+	baseParsed, err := ParseIdeaDocument(filePath, "sha-stale", baseMarkdown)
+	if err != nil {
+		t.Fatalf("ParseIdeaDocument(base): %v", err)
+	}
+
+	latestDoc := baseDoc
+	latestDoc.ProjectRepoURL = "https://github.com/example/repo-brain"
+	latestDoc.ProjectRepoStatus = "ready"
+	latestMarkdown, err := RenderIdeaDocument(latestDoc)
+	if err != nil {
+		t.Fatalf("RenderIdeaDocument(latest): %v", err)
+	}
+
+	files := map[string]string{filePath: latestMarkdown}
+	shas := map[string]string{filePath: "sha-ready"}
+	conflicted := false
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/"+filePath):
+			writeJSONFixture(w, map[string]any{
+				"name":     "repo-brain.md",
+				"path":     filePath,
+				"sha":      shas[filePath],
+				"encoding": "base64",
+				"content":  base64.StdEncoding.EncodeToString([]byte(files[filePath])),
+			})
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/"+filePath):
+			var req githubPutContentRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode update request: %v", err)
+			}
+			if !conflicted {
+				conflicted = true
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"message": filePath + " does not match sha-stale",
+				})
+				return
+			}
+			if req.SHA != "sha-ready" {
+				t.Fatalf("expected retry to use latest sha, got %q", req.SHA)
+			}
+			content, _ := base64.StdEncoding.DecodeString(req.Content)
+			files[filePath] = string(content)
+			shas[filePath] = "sha-updated"
+			writeJSONFixture(w, map[string]any{
+				"content": map[string]any{
+					"name": "repo-brain.md",
+					"path": filePath,
+					"sha":  "sha-updated",
+				},
+			})
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	svc := &GitHubIdeaOSService{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+	cfg := IdeaOSConfig{
+		RepoURL:     "https://github.com/example/ideas",
+		Branch:      "main",
+		Directory:   "ideas",
+		GitHubToken: "ghp_test",
+	}
+
+	updated, err := svc.UpdateIdea(context.Background(), cfg, UpdateIdeaInput{
+		Slug:              "repo-brain",
+		Code:              "idea0001",
+		Title:             "Repo Brain",
+		Content:           strings.Replace(baseParsed.Content, "Initial content.", "Updated content.", 1),
+		BaseTitle:         "Repo Brain",
+		BaseContent:       baseParsed.Content,
+		Tags:              baseParsed.Tags,
+		BaseTags:          baseParsed.Tags,
+		CreatedAt:         "2026-04-01",
+		BaseCreatedAt:     "2026-04-01",
+		SHA:               "sha-stale",
+		ProjectRepoURL:    "",
+		ProjectRepoStatus: "creating",
+	})
+	if err != nil {
+		t.Fatalf("UpdateIdea: %v", err)
+	}
+
+	if updated.SHA != "sha-updated" {
+		t.Fatalf("expected updated sha, got %q", updated.SHA)
+	}
+	if !strings.Contains(files[filePath], "Updated content.") {
+		t.Fatalf("expected saved markdown to include updated content, got:\n%s", files[filePath])
+	}
+	if !strings.Contains(files[filePath], "project_repo_status: ready") {
+		t.Fatalf("expected saved markdown to preserve ready repo status, got:\n%s", files[filePath])
+	}
+	if !strings.Contains(files[filePath], "- Repository: https://github.com/example/repo-brain") {
+		t.Fatalf("expected saved markdown to preserve repo link, got:\n%s", files[filePath])
+	}
+}
+
+func TestGitHubIdeaOSServiceUpdateIdeaReturnsConflictOnUserEdit(t *testing.T) {
+	const filePath = "ideas/repo-brain/repo-brain.md"
+
+	baseDoc := IdeaDocument{
+		IdeaSummary: IdeaSummary{
+			Slug:      "repo-brain",
+			Title:     "Repo Brain",
+			CreatedAt: "2026-04-01",
+		},
+		Content: "# Notes\n\nInitial content.",
+	}
+	baseMarkdown, err := RenderIdeaDocument(baseDoc)
+	if err != nil {
+		t.Fatalf("RenderIdeaDocument(base): %v", err)
+	}
+	baseParsed, err := ParseIdeaDocument(filePath, "sha-stale", baseMarkdown)
+	if err != nil {
+		t.Fatalf("ParseIdeaDocument(base): %v", err)
+	}
+
+	remoteDoc := baseDoc
+	remoteDoc.Content = "# Notes\n\nRemote edit."
+	remoteMarkdown, err := RenderIdeaDocument(remoteDoc)
+	if err != nil {
+		t.Fatalf("RenderIdeaDocument(remote): %v", err)
+	}
+
+	files := map[string]string{filePath: remoteMarkdown}
+	shas := map[string]string{filePath: "sha-remote"}
+	conflicted := false
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/"+filePath):
+			writeJSONFixture(w, map[string]any{
+				"name":     "repo-brain.md",
+				"path":     filePath,
+				"sha":      shas[filePath],
+				"encoding": "base64",
+				"content":  base64.StdEncoding.EncodeToString([]byte(files[filePath])),
+			})
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/"+filePath):
+			var req githubPutContentRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode update request: %v", err)
+			}
+			if !conflicted {
+				conflicted = true
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"message": filePath + " does not match sha-stale",
+				})
+				return
+			}
+			t.Fatal("expected conflicting update not to retry put")
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	svc := &GitHubIdeaOSService{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+	cfg := IdeaOSConfig{
+		RepoURL:     "https://github.com/example/ideas",
+		Branch:      "main",
+		Directory:   "ideas",
+		GitHubToken: "ghp_test",
+	}
+
+	_, err = svc.UpdateIdea(context.Background(), cfg, UpdateIdeaInput{
+		Slug:          "repo-brain",
+		Title:         "Repo Brain",
+		Content:       "# Notes\n\nMy local edit.",
+		BaseTitle:     "Repo Brain",
+		BaseContent:   baseParsed.Content,
+		Tags:          baseParsed.Tags,
+		BaseTags:      baseParsed.Tags,
+		CreatedAt:     "2026-04-01",
+		BaseCreatedAt: "2026-04-01",
+		SHA:           "sha-stale",
+	})
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+
+	var conflictErr *IdeaConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("expected IdeaConflictError, got %T: %v", err, err)
 	}
 }
 

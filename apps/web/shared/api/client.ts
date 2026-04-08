@@ -38,8 +38,10 @@ import type {
   IdeaOSConfig,
   IdeaSummary,
   IdeaDocument,
+  IdeaIssuesResponse,
+  GitHubAccount,
 } from "@/shared/types";
-import type { UpdateIdeaOSConfigRequest, CreateIdeaRequest, UpdateIdeaRequest } from "@/shared/types";
+import type { UpdateIdeaOSConfigRequest, CreateIdeaRequest, UpdateIdeaRequest, RecommendIdeaNameRequest, RecommendIdeaNameResponse } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
 export interface LoginResponse {
@@ -166,6 +168,22 @@ export class ApiClient {
   }
 
   // IdeaOS
+  async startGitHubOAuth(redirectPath = "/settings?tab=ideas"): Promise<{ authorize_url: string }> {
+    const search = new URLSearchParams();
+    search.set("redirect_path", redirectPath);
+    return this.fetch(`/api/github/oauth/start?${search}`);
+  }
+
+  async getGitHubAccount(): Promise<{ connected: boolean; account: GitHubAccount | null }> {
+    return this.fetch("/api/github/account");
+  }
+
+  async disconnectGitHubAccount(): Promise<void> {
+    await this.fetch("/api/github/account", {
+      method: "DELETE",
+    });
+  }
+
   async getIdeaOSConfig(): Promise<IdeaOSConfig> {
     return this.fetch("/api/ideas/config");
   }
@@ -181,6 +199,13 @@ export class ApiClient {
     return this.fetch("/api/ideas");
   }
 
+  async recommendIdeaNames(data: RecommendIdeaNameRequest): Promise<RecommendIdeaNameResponse> {
+    return this.fetch("/api/ideas/recommend-name", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async createIdea(data: CreateIdeaRequest): Promise<IdeaDocument> {
     return this.fetch("/api/ideas", {
       method: "POST",
@@ -192,10 +217,27 @@ export class ApiClient {
     return this.fetch(`/api/ideas/${slug}`);
   }
 
+  async getIdeaIssues(slug: string): Promise<IdeaIssuesResponse> {
+    return this.fetch(`/api/ideas/${slug}/issues`);
+  }
+
   async updateIdea(slug: string, data: UpdateIdeaRequest): Promise<IdeaDocument> {
     return this.fetch(`/api/ideas/${slug}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async createIdeaIssue(slug: string, data: CreateIssuePayload): Promise<Issue> {
+    return this.fetch(`/api/ideas/${slug}/issues`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async retryIdeaRepo(slug: string): Promise<{ message: string }> {
+    return this.fetch(`/api/ideas/${slug}/retry-repo`, {
+      method: "POST",
     });
   }
 

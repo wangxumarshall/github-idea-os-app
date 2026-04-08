@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Check, ChevronRight, Maximize2, Minimize2, UserMinus, X as XIcon } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, FolderGit2, Maximize2, Minimize2, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
@@ -37,6 +37,13 @@ import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 
+function repoLabel(repoUrl?: string | null) {
+  if (!repoUrl) return "Repository";
+  const trimmed = repoUrl.replace(/\/+$/, "");
+  const parts = trimmed.split("/");
+  return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : repoUrl;
+}
+
 // ---------------------------------------------------------------------------
 // Pill trigger — shared rounded-full button style for toolbar
 // ---------------------------------------------------------------------------
@@ -67,6 +74,7 @@ function PillButton({
 
 export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?: Record<string, unknown> | null }) {
   const router = useRouter();
+  const workspace = useWorkspaceStore((s) => s.workspace);
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
@@ -84,6 +92,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [repoUrl, setRepoUrl] = useState<string | null>((data?.repo_url as string | null) ?? null);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Assignee popover
@@ -114,6 +123,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
       : "Assignee";
 
   const dueDateObj = dueDate ? new Date(dueDate) : undefined;
+  const repoOptions = workspace?.repos ?? [];
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -129,16 +139,22 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const issue = await api.createIssue({
+      const payload = {
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
+        parent_issue_id: (data?.parent_issue_id as string | undefined) || undefined,
+        repo_url: repoUrl || undefined,
         due_date: dueDate || undefined,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
-      });
+      };
+      const ideaSlug = data?.idea_slug as string | undefined;
+      const issue = ideaSlug
+        ? await api.createIdeaIssue(ideaSlug, payload)
+        : await api.createIssue(payload);
       useIssueStore.getState().addIssue(issue);
       clearDraft();
       onClose();
@@ -381,6 +397,44 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               </div>
             </PopoverContent>
           </Popover>
+
+          {/* Repository */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton>
+                  <FolderGit2 className="size-3.5 text-muted-foreground" />
+                  <span>{repoLabel(repoUrl)}</span>
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-72">
+              <DropdownMenuItem onClick={() => setRepoUrl(null)}>
+                <FolderGit2 className="size-3.5 text-muted-foreground" />
+                <span>No repository</span>
+                {!repoUrl && <Check className="ml-auto size-3.5" />}
+              </DropdownMenuItem>
+              {repoUrl && !repoOptions.some((repo) => repo.url === repoUrl) && (
+                <DropdownMenuItem onClick={() => setRepoUrl(repoUrl)}>
+                  <FolderGit2 className="size-3.5 text-muted-foreground" />
+                  <div className="min-w-0 flex-1 truncate">{repoLabel(repoUrl)}</div>
+                  <Check className="ml-auto size-3.5" />
+                </DropdownMenuItem>
+              )}
+              {repoOptions.map((repo) => (
+                <DropdownMenuItem key={repo.url} onClick={() => setRepoUrl(repo.url)}>
+                  <FolderGit2 className="size-3.5 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{repoLabel(repo.url)}</div>
+                    {repo.description && (
+                      <div className="truncate text-xs text-muted-foreground">{repo.description}</div>
+                    )}
+                  </div>
+                  {repo.url === repoUrl && <Check className="ml-auto size-3.5" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Due date */}
           <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>

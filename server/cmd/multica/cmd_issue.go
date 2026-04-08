@@ -139,6 +139,7 @@ func init() {
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
+	issueCreateCmd.Flags().String("repo", "", "Repository URL to bind to this issue")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
@@ -149,6 +150,7 @@ func init() {
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent)")
+	issueUpdateCmd.Flags().String("repo", "", "New repository URL")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -330,6 +332,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
+	if v, _ := cmd.Flags().GetString("repo"); v != "" {
+		body["repo_url"] = v
+	}
 	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
 		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
 		if resolveErr != nil {
@@ -403,6 +408,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
+	if cmd.Flags().Changed("repo") {
+		v, _ := cmd.Flags().GetString("repo")
+		body["repo_url"] = v
+	}
 	if cmd.Flags().Changed("assignee") {
 		v, _ := cmd.Flags().GetString("assignee")
 		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
@@ -414,7 +423,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, --repo, etc.")
 	}
 
 	var result map[string]any

@@ -11,37 +11,38 @@ import (
 )
 
 type IdeaRecord struct {
-	ID                 string
-	WorkspaceID        string
-	OwnerUserID        string
-	GitHubAccountID    string
-	SeqNo              int
-	Code               string
-	SlugSuffix         string
-	SlugFull           string
-	Title              string
-	RawInput           string
-	Summary            string
-	Tags               []string
-	IdeaPath           string
-	MarkdownSHA        string
-	ProjectRepoName    string
-	ProjectRepoURL     string
-	ProjectRepoStatus  string
-	ProvisioningError  string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                string
+	WorkspaceID       string
+	OwnerUserID       string
+	GitHubAccountID   string
+	SeqNo             int
+	Code              string
+	SlugSuffix        string
+	SlugFull          string
+	Title             string
+	RawInput          string
+	Summary           string
+	Tags              []string
+	IdeaPath          string
+	MarkdownSHA       string
+	RootIssueID       string
+	ProjectRepoName   string
+	ProjectRepoURL    string
+	ProjectRepoStatus string
+	ProvisioningError string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type IdeaJobRecord struct {
 	ID        string
-	IdeaID     string
-	JobType    string
-	Status     string
-	Attempts   int
-	Payload    map[string]any
-	LastError  string
-	RunAfter   time.Time
+	IdeaID    string
+	JobType   string
+	Status    string
+	Attempts  int
+	Payload   map[string]any
+	LastError string
+	RunAfter  time.Time
 }
 
 type IdeaNameSuggestion struct {
@@ -95,15 +96,15 @@ func (s *IdeaStore) InsertIdea(ctx context.Context, dbtx db.DBTX, record IdeaRec
 	err = dbtx.QueryRow(ctx, `
 		INSERT INTO idea (
 			workspace_id, owner_user_id, github_account_id, seq_no, code, slug_suffix, slug_full,
-			title, raw_input, summary, tags, idea_path, markdown_sha, project_repo_name, project_repo_url,
+			title, raw_input, summary, tags, idea_path, markdown_sha, root_issue_id, project_repo_name, project_repo_url,
 			project_repo_status, provisioning_error
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, NULLIF($13, ''), $14, $15, $16, NULLIF($17, ''))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, NULLIF($13, ''), NULLIF($14, '')::uuid, $15, $16, $17, NULLIF($18, ''))
 		RETURNING id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
-		          title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		          title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), COALESCE(root_issue_id::text, ''), project_repo_name, project_repo_url,
 		          project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
 	`, record.WorkspaceID, record.OwnerUserID, record.GitHubAccountID, record.SeqNo, record.Code, record.SlugSuffix, record.SlugFull,
-		record.Title, record.RawInput, record.Summary, string(tagsJSON), record.IdeaPath, record.MarkdownSHA, record.ProjectRepoName, record.ProjectRepoURL,
+		record.Title, record.RawInput, record.Summary, string(tagsJSON), record.IdeaPath, record.MarkdownSHA, record.RootIssueID, record.ProjectRepoName, record.ProjectRepoURL,
 		record.ProjectRepoStatus, record.ProvisioningError).Scan(
 		&created.ID,
 		&created.WorkspaceID,
@@ -119,6 +120,7 @@ func (s *IdeaStore) InsertIdea(ctx context.Context, dbtx db.DBTX, record IdeaRec
 		&tagsJSON,
 		&created.IdeaPath,
 		&created.MarkdownSHA,
+		&created.RootIssueID,
 		&created.ProjectRepoName,
 		&created.ProjectRepoURL,
 		&created.ProjectRepoStatus,
@@ -152,6 +154,16 @@ func (s *IdeaStore) UpdateIdeaContent(ctx context.Context, dbtx db.DBTX, ideaID,
 	return err
 }
 
+func (s *IdeaStore) UpdateIdeaRootIssue(ctx context.Context, dbtx db.DBTX, ideaID, rootIssueID string) error {
+	_, err := dbtx.Exec(ctx, `
+		UPDATE idea
+		SET root_issue_id = NULLIF($2, '')::uuid,
+		    updated_at = now()
+		WHERE id = $1
+	`, ideaID, rootIssueID)
+	return err
+}
+
 func (s *IdeaStore) UpdateIdeaRepoState(ctx context.Context, dbtx db.DBTX, ideaID, repoURL, status, provisioningError string) error {
 	_, err := dbtx.Exec(ctx, `
 		UPDATE idea
@@ -167,7 +179,7 @@ func (s *IdeaStore) UpdateIdeaRepoState(ctx context.Context, dbtx db.DBTX, ideaI
 func (s *IdeaStore) GetIdeaBySlug(ctx context.Context, dbtx db.DBTX, workspaceID, slugFull string) (*IdeaRecord, error) {
 	rows, err := dbtx.Query(ctx, `
 		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
-		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), COALESCE(root_issue_id::text, ''), project_repo_name, project_repo_url,
 		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
 		FROM idea
 		WHERE workspace_id = $1 AND slug_full = $2
@@ -191,7 +203,7 @@ func (s *IdeaStore) GetIdeaBySlug(ctx context.Context, dbtx db.DBTX, workspaceID
 func (s *IdeaStore) ListIdeasByWorkspace(ctx context.Context, dbtx db.DBTX, workspaceID string) ([]IdeaRecord, error) {
 	rows, err := dbtx.Query(ctx, `
 		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
-		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), COALESCE(root_issue_id::text, ''), project_repo_name, project_repo_url,
 		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
 		FROM idea
 		WHERE workspace_id = $1
@@ -216,7 +228,7 @@ func (s *IdeaStore) ListIdeasByWorkspace(ctx context.Context, dbtx db.DBTX, work
 func (s *IdeaStore) GetIdeaByID(ctx context.Context, dbtx db.DBTX, ideaID string) (*IdeaRecord, error) {
 	rows, err := dbtx.Query(ctx, `
 		SELECT id::text, workspace_id::text, owner_user_id::text, github_account_id::text, seq_no, code, slug_suffix, slug_full,
-		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), project_repo_name, project_repo_url,
+		       title, raw_input, summary, tags, idea_path, COALESCE(markdown_sha, ''), COALESCE(root_issue_id::text, ''), project_repo_name, project_repo_url,
 		       project_repo_status, COALESCE(provisioning_error, ''), created_at, updated_at
 		FROM idea
 		WHERE id = $1
@@ -335,6 +347,7 @@ func scanIdea(rows interface{ Scan(dest ...any) error }) (IdeaRecord, error) {
 		&tagsJSON,
 		&record.IdeaPath,
 		&record.MarkdownSHA,
+		&record.RootIssueID,
 		&record.ProjectRepoName,
 		&record.ProjectRepoURL,
 		&record.ProjectRepoStatus,

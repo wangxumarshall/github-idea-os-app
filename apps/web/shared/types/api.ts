@@ -5,19 +5,33 @@ export interface UpdateIdeaOSConfigRequest {
   repo_url?: string;
   branch?: string;
   directory?: string;
-  github_token?: string;
-  clear_github_token?: boolean;
+  repo_visibility?: "private" | "public";
+  default_agent_ids?: string[];
 }
 
 export interface CreateIdeaRequest {
-  title: string;
+  raw_input: string;
+  selected_name: string;
+}
+
+export interface RecommendIdeaNameRequest {
+  raw_input: string;
+}
+
+export interface RecommendIdeaNameResponse {
+  next_code: string;
+  suggestions: import("./idea").IdeaNameSuggestion[];
 }
 
 export interface UpdateIdeaRequest {
   title: string;
   content: string;
+  base_title: string;
+  base_content: string;
   tags?: string[];
+  base_tags?: string[];
   created_at: string;
+  base_created_at: string;
   sha: string;
 }
 
@@ -30,6 +44,7 @@ export interface CreateIssuePayload {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
+  repo_url?: string;
   due_date?: string;
   attachment_ids?: string[];
 }
@@ -42,6 +57,7 @@ export interface UpdateIssueRequest {
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
   position?: number;
+  repo_url?: string | null;
   due_date?: string | null;
 }
 

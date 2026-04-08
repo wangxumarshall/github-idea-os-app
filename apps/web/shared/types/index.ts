@@ -1,5 +1,5 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
-export type { IdeaOSConfig, IdeaSummary, IdeaDocument } from "./idea";
+export type { IdeaOSConfig, IdeaSummary, IdeaDocument, IdeaIssuesResponse, IdeaNameSuggestion, GitHubAccount } from "./idea";
 export type {
   Agent,
   AgentStatus,

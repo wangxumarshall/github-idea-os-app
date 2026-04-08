@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
@@ -157,3 +161,98 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 }
 
+func TestRunIssueCreateIncludesRepoURL(t *testing.T) {
+	var received map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"title":      received["title"],
+			"status":     "todo",
+			"priority":   "none",
+			"identifier": "TES-1",
+		})
+	}))
+	defer srv.Close()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	cmd.Flags().String("assignee", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().String("repo", "", "")
+	cmd.Flags().String("due-date", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace-id", "ws-1")
+	_ = cmd.Flags().Set("title", "Build repo-aware issue")
+	_ = cmd.Flags().Set("repo", "https://github.com/example/repo-aware")
+
+	stdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	defer func() {
+		os.Stdout = stdout
+	}()
+
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	_ = w.Close()
+	_, _ = io.ReadAll(r)
+
+	if received["repo_url"] != "https://github.com/example/repo-aware" {
+		t.Fatalf("expected repo_url in request body, got %#v", received["repo_url"])
+	}
+}
+
+func TestRunIdeaGet(t *testing.T) {
+	var requestedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"slug":             "idea0001-repo-brain",
+			"title":            "Repo Brain",
+			"code":             "idea0001",
+			"root_issue_id":    "issue-root-1",
+			"project_repo_url": "https://github.com/example/repo-brain",
+		})
+	}))
+	defer srv.Close()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("output", "json", "")
+	_ = cmd.Flags().Set("server-url", srv.URL)
+	_ = cmd.Flags().Set("workspace-id", "ws-1")
+
+	stdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	defer func() {
+		os.Stdout = stdout
+	}()
+
+	if err := runIdeaGet(cmd, []string{"idea0001-repo-brain"}); err != nil {
+		t.Fatalf("runIdeaGet: %v", err)
+	}
+	_ = w.Close()
+	_, _ = io.ReadAll(r)
+
+	if requestedPath != "/api/ideas/idea0001-repo-brain" {
+		t.Fatalf("unexpected request path %q", requestedPath)
+	}
+}
