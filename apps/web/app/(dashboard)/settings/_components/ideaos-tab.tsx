@@ -25,6 +25,14 @@ const defaultConfig: IdeaOSConfig = {
   github_login: null,
 };
 
+function normalizeIdeaOSConfig(config: Partial<IdeaOSConfig> | null | undefined): IdeaOSConfig {
+  return {
+    ...defaultConfig,
+    ...config,
+    default_agent_ids: Array.isArray(config?.default_agent_ids) ? config.default_agent_ids : [],
+  };
+}
+
 export function IdeaOSTab() {
   const searchParams = useSearchParams();
   const user = useAuthStore((s) => s.user);
@@ -50,7 +58,7 @@ export function IdeaOSTab() {
       try {
         const nextConfig = await api.getIdeaOSConfig();
         if (!cancelled) {
-          setConfig(nextConfig);
+          setConfig(normalizeIdeaOSConfig(nextConfig));
         }
       } catch (error) {
         if (!cancelled) {
@@ -88,7 +96,7 @@ export function IdeaOSTab() {
         repo_visibility: config.repo_visibility,
         default_agent_ids: config.default_agent_ids,
       });
-      setConfig(nextConfig);
+      setConfig(normalizeIdeaOSConfig(nextConfig));
       toast.success("IdeaOS settings saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save IdeaOS settings");
@@ -113,7 +121,7 @@ export function IdeaOSTab() {
     try {
       await api.disconnectGitHubAccount();
       const nextConfig = await api.getIdeaOSConfig();
-      setConfig(nextConfig);
+      setConfig(normalizeIdeaOSConfig(nextConfig));
       toast.success("GitHub disconnected");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to disconnect GitHub");

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Lightbulb, Plus, Search, Sparkles } from "lucide-react";
+import { FolderGit2, Lightbulb, Plus, Search, Sparkles } from "lucide-react";
 import { api } from "@/shared/api";
 import type { IdeaOSConfig, IdeaSummary } from "@/shared/types";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,10 @@ function IdeaCard({ idea }: { idea: IdeaSummary }) {
       <Card className="h-full border-border/70 bg-card/80 transition-colors hover:border-foreground/20 hover:bg-card">
         <CardHeader className="space-y-3">
           <div className="flex items-center justify-between gap-4">
-            <CardTitle className="text-base leading-tight">{idea.title}</CardTitle>
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{idea.code}</div>
+              <CardTitle className="mt-1 text-base leading-tight">{idea.title}</CardTitle>
+            </div>
             <span className="shrink-0 text-xs text-muted-foreground">{idea.updated_at}</span>
           </div>
           <CardDescription className="line-clamp-2 text-sm">
@@ -36,6 +39,13 @@ function IdeaCard({ idea }: { idea: IdeaSummary }) {
           ) : (
             <span className="text-xs text-muted-foreground">No tags</span>
           )}
+          <Badge
+            variant={idea.project_repo_status === "ready" ? "secondary" : idea.project_repo_status === "failed" ? "destructive" : "outline"}
+            className="rounded-full px-2.5 py-0.5 text-[11px]"
+          >
+            <FolderGit2 className="h-3 w-3" />
+            {idea.project_repo_status}
+          </Badge>
         </CardContent>
       </Card>
     </Link>
@@ -115,7 +125,7 @@ export function IdeasPage() {
     );
   }, [ideas, deferredSearch]);
 
-  const configured = !!config?.repo_url && config?.token_configured;
+  const configured = !!config?.repo_url && config?.github_connected;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_22%)]">
@@ -162,7 +172,7 @@ export function IdeasPage() {
               <div>
                 <CardTitle>Configure GitHub first</CardTitle>
                 <CardDescription className="mt-1 max-w-xl">
-                  Add a GitHub repository, branch, directory, and token in workspace settings before you start capturing ideas.
+                  Connect GitHub and configure an Ideas repository in workspace settings before you start capturing ideas.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -197,7 +207,7 @@ export function IdeasPage() {
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">Recent</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {filteredIdeas.length} idea{filteredIdeas.length === 1 ? "" : "s"} synced from GitHub
+                  {filteredIdeas.length} idea{filteredIdeas.length === 1 ? "" : "s"} tracked in GitHub IdeaOS
                 </p>
               </div>
             </div>
