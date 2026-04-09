@@ -156,7 +156,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},
@@ -295,6 +295,10 @@ func TestActivityTaskCompleted(t *testing.T) {
 			"agent_id": agentID,
 			"issue_id": issueID,
 			"status":   "completed",
+			"result": map[string]any{
+				"delivery_state": "handoff_required",
+				"compare_url":    "https://github.com/example/repo/compare/main...feat/test?expand=1",
+			},
 		},
 	})
 
@@ -307,6 +311,16 @@ func TestActivityTaskCompleted(t *testing.T) {
 	}
 	if util.UUIDToString(activities[0].ActorID) != agentID {
 		t.Fatalf("expected actor_id %s, got %s", agentID, util.UUIDToString(activities[0].ActorID))
+	}
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("failed to unmarshal details: %v", err)
+	}
+	if details["delivery_state"] != "handoff_required" {
+		t.Fatalf("expected delivery_state handoff_required, got %q", details["delivery_state"])
+	}
+	if details["compare_url"] == "" {
+		t.Fatal("expected compare_url in task_completed activity details")
 	}
 }
 

@@ -175,6 +175,7 @@ export interface TaskCompletedPayload {
   agent_id: string;
   issue_id: string;
   status: string;
+  result?: import("./agent").AgentTaskResult;
 }
 
 export interface TaskFailedPayload {
@@ -182,6 +183,7 @@ export interface TaskFailedPayload {
   agent_id: string;
   issue_id: string;
   status: string;
+  result?: import("./agent").AgentTaskResult;
 }
 
 export interface TaskCancelledPayload {
@@ -189,6 +191,7 @@ export interface TaskCancelledPayload {
   agent_id: string;
   issue_id: string;
   status: string;
+  result?: import("./agent").AgentTaskResult;
 }
 
 export interface ReactionAddedPayload {

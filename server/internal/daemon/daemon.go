@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/usage"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -846,7 +850,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := d.client.CompleteTask(ctx, task.ID, protocol.TaskCompletedPayload{
+			TaskID:        task.ID,
+			Output:        result.Comment,
+			Summary:       result.Summary,
+			PRURL:         result.PRURL,
+			CompareURL:    result.CompareURL,
+			BranchName:    result.BranchName,
+			DeliveryState: result.DeliveryState,
+			HandoffReason: result.HandoffReason,
+		}, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error())); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
@@ -1121,11 +1134,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		if result.Output == "" {
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
 		}
+		branchName := detectGitBranch(env.WorkDir)
+		prURL := extractFirstURL(result.Output, githubPRPattern)
+		compareURL := extractFirstURL(result.Output, githubComparePattern)
+		if compareURL == "" {
+			compareURL = buildGitHubCompareURL(task.SelectedRepoURL, env.WorkDir, branchName)
+		}
+		deliveryState, handoffReason, summary := inferDeliveryMetadata(result.Output, branchName, prURL, compareURL)
 		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
+			Status:        "completed",
+			Comment:       result.Output,
+			Summary:       summary,
+			PRURL:         prURL,
+			CompareURL:    compareURL,
+			BranchName:    branchName,
+			DeliveryState: deliveryState,
+			HandoffReason: handoffReason,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
 		}, nil
 	case "timeout":
 		return TaskResult{}, fmt.Errorf("%s timed out after %s", provider, d.cfg.AgentTimeout)
@@ -1135,6 +1161,119 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			errMsg = fmt.Sprintf("%s execution %s", provider, result.Status)
 		}
 		return TaskResult{Status: "blocked", Comment: errMsg}, nil
+	}
+}
+
+var (
+	githubPRPattern      = regexp.MustCompile(`https://github\.com/[^/\s]+/[^/\s]+/pull/\d+`)
+	githubComparePattern = regexp.MustCompile(`https://github\.com/[^/\s]+/[^/\s]+/compare/[^\s]+`)
+)
+
+func resolveGitRepoDir(workDir string) string {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".git")); err == nil {
+		return workDir
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(workDir, entry.Name())
+		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func detectGitBranch(workDir string) string {
+	repoDir := resolveGitRepoDir(workDir)
+	if repoDir == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--show-current")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func detectBaseBranch(workDir string) string {
+	repoDir := resolveGitRepoDir(workDir)
+	if repoDir == "" {
+		return "main"
+	}
+	cmd := exec.Command("git", "-C", repoDir, "symbolic-ref", "refs/remotes/origin/HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "main"
+	}
+	ref := strings.TrimSpace(string(out))
+	const prefix = "refs/remotes/origin/"
+	if strings.HasPrefix(ref, prefix) {
+		ref = strings.TrimPrefix(ref, prefix)
+	}
+	if ref == "" {
+		return "main"
+	}
+	return ref
+}
+
+func extractFirstURL(text string, pattern *regexp.Regexp) string {
+	if pattern == nil || strings.TrimSpace(text) == "" {
+		return ""
+	}
+	match := pattern.FindString(text)
+	return strings.TrimSpace(match)
+}
+
+func buildGitHubCompareURL(repoURL, workDir, branchName string) string {
+	repoURL = strings.TrimSpace(repoURL)
+	branchName = strings.TrimSpace(branchName)
+	if repoURL == "" || branchName == "" {
+		return ""
+	}
+	normalized := strings.TrimSuffix(repoURL, ".git")
+	normalized = strings.TrimSuffix(normalized, "/")
+	if strings.HasPrefix(normalized, "git@github.com:") {
+		normalized = "https://github.com/" + strings.TrimPrefix(normalized, "git@github.com:")
+	}
+	u, err := url.Parse(normalized)
+	if err != nil || u.Host != "github.com" {
+		return ""
+	}
+	baseBranch := detectBaseBranch(workDir)
+	return fmt.Sprintf("%s/compare/%s...%s?expand=1", normalized, baseBranch, branchName)
+}
+
+func inferDeliveryMetadata(output, branchName, prURL, compareURL string) (deliveryState, handoffReason, summary string) {
+	lower := strings.ToLower(output)
+	switch {
+	case strings.TrimSpace(prURL) != "":
+		return "delivered", "", "Delivery ready. PR created."
+	case strings.TrimSpace(compareURL) != "" || strings.TrimSpace(branchName) != "":
+		reason := ""
+		switch {
+		case strings.Contains(lower, "gh is not logged in"):
+			reason = "GitHub CLI is not logged in in the task environment."
+		case strings.Contains(lower, "token returns 401"), strings.Contains(lower, "returned 401"):
+			reason = "GitHub authentication failed in the task environment."
+		case strings.Contains(lower, "could not create the pr"), strings.Contains(lower, "failed to create the pr"):
+			reason = "PR creation is unavailable from the task environment."
+		case strings.Contains(lower, "pr creation"):
+			reason = "PR creation requires handoff."
+		}
+		return "handoff_required", reason, "Delivery ready, but PR creation requires handoff."
+	default:
+		return "completed", "", "Run completed."
 	}
 }
 

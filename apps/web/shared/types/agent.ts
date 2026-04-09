@@ -54,6 +54,16 @@ export interface AgentTask {
   created_at: string;
 }
 
+export interface AgentTaskResult {
+  output?: string;
+  summary?: string;
+  pr_url?: string;
+  compare_url?: string;
+  branch_name?: string;
+  delivery_state?: "delivered" | "handoff_required" | "completed";
+  handoff_reason?: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;

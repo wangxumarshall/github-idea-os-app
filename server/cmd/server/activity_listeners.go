@@ -234,6 +234,16 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 		return
 	}
 
+	details := map[string]any{}
+	if result, ok := payload["result"].(map[string]any); ok {
+		for _, key := range []string{"delivery_state", "pr_url", "compare_url", "branch_name", "handoff_reason", "summary"} {
+			if value, exists := result[key]; exists && value != nil {
+				details[key] = value
+			}
+		}
+	}
+	detailsJSON, _ := json.Marshal(details)
+
 	// Look up issue to get workspace_id
 	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
 	if err != nil {
@@ -248,7 +258,7 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 		ActorType:   util.StrToText("agent"),
 		ActorID:     parseUUID(agentID),
 		Action:      action,
-		Details:     []byte("{}"),
+		Details:     detailsJSON,
 	})
 	if err != nil {
 		slog.Error("activity: failed to record task activity",

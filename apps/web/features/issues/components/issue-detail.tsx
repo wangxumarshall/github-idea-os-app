@@ -102,37 +102,45 @@ function formatActivity(
   entry: TimelineEntry,
   resolveActorName?: (type: string, id: string) => string,
 ): string {
-  const details = (entry.details ?? {}) as Record<string, string>;
+  const details = (entry.details ?? {}) as Record<string, unknown>;
+  const detailString = (value: unknown, fallback = "?") =>
+    typeof value === "string" && value ? value : fallback;
   switch (entry.action) {
     case "created":
       return "created this issue";
     case "status_changed":
-      return `changed status from ${statusLabel(details.from ?? "?")} to ${statusLabel(details.to ?? "?")}`;
+      return `changed status from ${statusLabel(detailString(details.from))} to ${statusLabel(detailString(details.to))}`;
     case "priority_changed":
-      return `changed priority from ${priorityLabel(details.from ?? "?")} to ${priorityLabel(details.to ?? "?")}`;
+      return `changed priority from ${priorityLabel(detailString(details.from))} to ${priorityLabel(detailString(details.to))}`;
     case "assignee_changed": {
       const isSelfAssign = details.to_type === entry.actor_type && details.to_id === entry.actor_id;
       if (isSelfAssign) return "self-assigned this issue";
-      const toName = details.to_id && details.to_type && resolveActorName
-        ? resolveActorName(details.to_type, details.to_id)
+      const toType = typeof details.to_type === "string" ? details.to_type : null;
+      const toID = typeof details.to_id === "string" ? details.to_id : null;
+      const fromID = typeof details.from_id === "string" ? details.from_id : null;
+      const toName = toID && toType && resolveActorName
+        ? resolveActorName(toType, toID)
         : null;
       if (toName) return `assigned to ${toName}`;
-      if (details.from_id && !details.to_id) return "removed assignee";
+      if (fromID && !toID) return "removed assignee";
       return "changed assignee";
     }
     case "due_date_changed": {
-      if (!details.to) return "removed due date";
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const toValue = typeof details.to === "string" ? details.to : "";
+      if (!toValue) return "removed due date";
+      const formatted = new Date(toValue).toLocaleDateString("en-US", { month: "short", day: "numeric" });
       return `set due date to ${formatted}`;
     }
     case "title_changed":
-      return `renamed this issue from "${details.from ?? "?"}" to "${details.to ?? "?"}"`;
+      return `renamed this issue from "${detailString(details.from)}" to "${detailString(details.to)}"`;
     case "description_updated":
       return "updated the description";
     case "task_completed":
-      return "completed the task";
+      if (details.delivery_state === "delivered") return "prepared delivery for review";
+      if (details.delivery_state === "handoff_required") return "prepared review handoff";
+      return "completed the run";
     case "task_failed":
-      return "task failed";
+      return "run failed";
     default:
       return entry.action ?? "";
   }

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -99,10 +101,15 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
-	body := map[string]any{"output": output}
-	if branchName != "" {
-		body["branch_name"] = branchName
+func (c *Client) CompleteTask(ctx context.Context, taskID string, payload protocol.TaskCompletedPayload, sessionID, workDir string) error {
+	body := map[string]any{
+		"output":         payload.Output,
+		"summary":        payload.Summary,
+		"pr_url":         payload.PRURL,
+		"compare_url":    payload.CompareURL,
+		"branch_name":    payload.BranchName,
+		"delivery_state": payload.DeliveryState,
+		"handoff_reason": payload.HandoffReason,
 	}
 	if sessionID != "" {
 		body["session_id"] = sessionID

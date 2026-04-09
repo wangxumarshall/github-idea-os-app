@@ -5,7 +5,7 @@ import { Bot, ChevronRight, ChevronUp, Loader2, ArrowDown, Brain, AlertCircle, C
 import { api } from "@/shared/api";
 import { useWSEvent } from "@/features/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@/shared/types/events";
-import type { AgentTask } from "@/shared/types/agent";
+import type { AgentTask, AgentTaskResult } from "@/shared/types/agent";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -41,6 +41,25 @@ function formatDuration(start: string, end: string): string {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${minutes}m ${secs}s`;
+}
+
+function getTaskResult(task: AgentTask): AgentTaskResult | null {
+  if (!task.result || typeof task.result !== "object") {
+    return null;
+  }
+  return task.result as AgentTaskResult;
+}
+
+function deliveryTone(result: AgentTaskResult | null): { label: string; className: string } | null {
+  if (!result?.delivery_state) return null;
+  switch (result.delivery_state) {
+    case "delivered":
+      return { label: "Delivery ready", className: "text-success" };
+    case "handoff_required":
+      return { label: "Handoff required", className: "text-warning" };
+    default:
+      return { label: "Run completed", className: "text-muted-foreground" };
+  }
 }
 
 function shortenPath(p: string): string {
@@ -445,6 +464,8 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
 function TaskRunEntry({ task }: { task: AgentTask }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
+  const result = getTaskResult(task);
+  const tone = deliveryTone(result);
 
   const loadMessages = useCallback(() => {
     if (items !== null) return; // already loaded
@@ -477,12 +498,31 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
         {duration && <span className="text-muted-foreground">{duration}</span>}
-        <span className={cn("ml-auto capitalize", task.status === "completed" ? "text-success" : "text-destructive")}>
-          {task.status}
+        <span className={cn("ml-auto", tone?.className ?? (task.status === "completed" ? "text-success" : "text-destructive"))}>
+          {tone?.label ?? task.status}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
+          {result && (
+            <div className="mb-3 rounded border bg-background/80 px-3 py-2 text-xs space-y-1">
+              {result.summary && (
+                <p className="font-medium text-foreground">{result.summary}</p>
+              )}
+              {result.branch_name && (
+                <p className="text-muted-foreground">Branch: <code>{result.branch_name}</code></p>
+              )}
+              {result.pr_url && (
+                <p><a href={result.pr_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">PR</a></p>
+              )}
+              {!result.pr_url && result.compare_url && (
+                <p><a href={result.compare_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Compare</a></p>
+              )}
+              {result.handoff_reason && (
+                <p className="text-muted-foreground">Handoff: {result.handoff_reason}</p>
+              )}
+            </div>
+          )}
           {items === null ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" />

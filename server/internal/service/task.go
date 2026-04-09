@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -244,8 +244,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if !task.TriggerCommentID.Valid {
 		var payload protocol.TaskCompletedPayload
 		if err := json.Unmarshal(result, &payload); err == nil {
-			if payload.Output != "" {
-				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+			summary := buildTaskDeliverySummaryComment(payload)
+			if summary != "" {
+				s.createAgentComment(ctx, task.IssueID, task.AgentID, summary, "system", task.TriggerCommentID)
 			}
 		}
 	}
@@ -426,6 +427,10 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	if workspaceID == "" {
 		return // Issue deleted; skip broadcast to avoid global leak
 	}
+	var result any
+	if len(task.Result) > 0 {
+		_ = json.Unmarshal(task.Result, &result)
+	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
@@ -436,6 +441,7 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 			"agent_id": util.UUIDToString(task.AgentID),
 			"issue_id": util.UUIDToString(task.IssueID),
 			"status":   task.Status,
+			"result":   result,
 		},
 	})
 }
@@ -501,6 +507,34 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_status": issue.Status,
 		},
 	})
+}
+
+func buildTaskDeliverySummaryComment(payload protocol.TaskCompletedPayload) string {
+	summary := strings.TrimSpace(payload.Summary)
+	if summary == "" {
+		switch strings.TrimSpace(payload.DeliveryState) {
+		case "delivered":
+			summary = "Delivery ready."
+		case "handoff_required":
+			summary = "Delivery ready, but PR creation requires handoff."
+		default:
+			summary = "Run completed."
+		}
+	}
+
+	lines := []string{summary}
+	if branch := strings.TrimSpace(payload.BranchName); branch != "" {
+		lines = append(lines, "Branch: `"+branch+"`")
+	}
+	if prURL := strings.TrimSpace(payload.PRURL); prURL != "" {
+		lines = append(lines, "PR: "+prURL)
+	} else if compareURL := strings.TrimSpace(payload.CompareURL); compareURL != "" {
+		lines = append(lines, "Compare: "+compareURL)
+	}
+	if reason := strings.TrimSpace(payload.HandoffReason); reason != "" {
+		lines = append(lines, "Handoff: "+reason)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func issueToMap(issue db.Issue, issuePrefix string) map[string]any {

@@ -139,11 +139,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("   b. Implement the changes and commit\n")
 		}
 		b.WriteString("   c. Push the branch to the remote\n")
-		b.WriteString("   d. Create a pull request (decide the target branch based on the repo's conventions)\n")
-		fmt.Fprintf(&b, "   e. Post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+		b.WriteString("   d. Create a pull request when the environment supports it\n")
+		fmt.Fprintf(&b, "   e. If a PR is created, post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+		b.WriteString("   f. If code is pushed but PR creation is unavailable from this environment, post a compare link and a short handoff note instead\n")
 		b.WriteString("6. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
-		fmt.Fprintf(&b, "7. Run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "8. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "7. When delivery artifacts are ready, run `multica issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "8. Only run `multica issue status %s blocked` for real implementation blockers that prevent delivery\n\n", ctx.IssueID)
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -187,7 +188,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Output\n\n")
 	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
-	b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
+	b.WriteString("Good: \"Delivery ready. PR: https://...\"\n")
+	b.WriteString("Good: \"Delivery ready, but PR creation requires handoff. Compare: https://...\"\n")
 	b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
 
 	return b.String()
