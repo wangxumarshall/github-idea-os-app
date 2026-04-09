@@ -14,7 +14,6 @@ import {
   Check,
   BookOpenText,
   SquarePen,
-  CircleUser,
   Lightbulb,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
@@ -48,22 +47,19 @@ import { useModalStore } from "@/features/modals";
 
 const primaryNav = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/my-issues", label: "My Issues", icon: CircleUser },
+  { href: "/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/issues", label: "Issues", icon: ListTodo },
 ];
 
 const workspaceNav = [
-  { href: "/ideas", label: "Ideas", icon: Lightbulb },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/runtimes", label: "Runtimes", icon: Monitor },
   { href: "/skills", label: "Skills", icon: BookOpenText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-function DraftDot() {
-  const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
-  if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+function isNavActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function AppSidebar() {
@@ -76,6 +72,7 @@ export function AppSidebar() {
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
 
   const unreadCount = useInboxStore((s) => s.unreadCount());
+  const hasIssueDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
 
   const logout = () => {
     router.push("/");
@@ -157,16 +154,31 @@ export function AppSidebar() {
                 </DropdownMenu>
               </SidebarMenuItem>
             </SidebarMenu>
-            <Tooltip>
-              <TooltipTrigger
-                className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
-                onClick={() => useModalStore.getState().open("create-issue")}
-              >
-                <SquarePen className="size-3.5" />
-                <DraftDot />
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New issue</TooltipContent>
-            </Tooltip>
+            <DropdownMenu>
+              <Tooltip>
+                <DropdownMenuTrigger
+                  render={
+                    <TooltipTrigger
+                      className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
+                    >
+                      <SquarePen className="size-3.5" />
+                      {hasIssueDraft && <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />}
+                    </TooltipTrigger>
+                  }
+                />
+                <TooltipContent side="bottom">Create</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-40">
+                <DropdownMenuItem onClick={() => router.push("/ideas/new")}>
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  New idea
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => useModalStore.getState().open("create-issue")}>
+                  <SquarePen className="h-3.5 w-3.5" />
+                  New issue
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </SidebarHeader>
 
@@ -176,7 +188,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {primaryNav.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isActive = isNavActive(pathname, item.href);
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
@@ -203,7 +215,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isActive = isNavActive(pathname, item.href);
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton

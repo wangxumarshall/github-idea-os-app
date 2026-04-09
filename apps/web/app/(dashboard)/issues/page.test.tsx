@@ -38,12 +38,29 @@ vi.mock("@/features/workspace", () => ({
   }),
   useWorkspaceStore: Object.assign(
     (selector?: any) => {
-      const state = { workspace: { id: "ws-1", name: "Test", slug: "test" }, agents: [], members: [] };
+      const state = {
+        workspace: { id: "ws-1", name: "Test", slug: "test" },
+        agents: [{ id: "agent-1", name: "Claude Agent", owner_id: "user-1", archived_at: null }],
+        members: [],
+      };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ workspace: { id: "ws-1", name: "Test", slug: "test" }, agents: [], members: [] }) },
+    {
+      getState: () => ({
+        workspace: { id: "ws-1", name: "Test", slug: "test" },
+        agents: [{ id: "agent-1", name: "Claude Agent", owner_id: "user-1", archived_at: null }],
+        members: [],
+      }),
+    },
   ),
   WorkspaceAvatar: ({ name }: { name: string }) => <span>{name.charAt(0)}</span>,
+}));
+
+vi.mock("@/features/auth", () => ({
+  useAuthStore: (selector?: any) => {
+    const state = { user: { id: "user-1" } };
+    return selector ? selector(state) : state;
+  },
 }));
 
 // Mock WebSocket context
@@ -131,6 +148,36 @@ const mockViewState = {
 
 vi.mock("@/features/issues/stores/view-store", () => ({
   initFilterWorkspaceSync: vi.fn(),
+  registerViewStoreForWorkspaceSync: vi.fn(),
+  viewStoreSlice: () => ({
+    viewMode: "board",
+    statusFilters: [],
+    priorityFilters: [],
+    assigneeFilters: [],
+    includeNoAssignee: false,
+    creatorFilters: [],
+    sortBy: "position",
+    sortDirection: "asc",
+    cardProperties: { priority: true, description: true, assignee: true, dueDate: true },
+    listCollapsedStatuses: [],
+    setViewMode: vi.fn(),
+    toggleStatusFilter: vi.fn(),
+    togglePriorityFilter: vi.fn(),
+    toggleAssigneeFilter: vi.fn(),
+    toggleNoAssignee: vi.fn(),
+    toggleCreatorFilter: vi.fn(),
+    hideStatus: vi.fn(),
+    showStatus: vi.fn(),
+    clearFilters: vi.fn(),
+    setSortBy: vi.fn(),
+    setSortDirection: vi.fn(),
+    toggleCardProperty: vi.fn(),
+    toggleListCollapsed: vi.fn(),
+  }),
+  viewStorePersistOptions: (name: string) => ({
+    name,
+    partialize: (state: any) => state,
+  }),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
     { getState: () => mockViewState, setState: vi.fn() },
@@ -285,6 +332,7 @@ import IssuesPage from "./page";
 describe("IssuesPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     mockStoreState = {
       issues: [],
       loading: true,
@@ -313,8 +361,8 @@ describe("IssuesPage", () => {
     render(<IssuesPage />);
 
     expect(screen.getByText("Implement auth")).toBeInTheDocument();
-    expect(screen.getByText("Design landing page")).toBeInTheDocument();
-    expect(screen.getByText("Write tests")).toBeInTheDocument();
+    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    expect(screen.queryByText("Write tests")).not.toBeInTheDocument();
   });
 
   it("renders board columns", async () => {
@@ -345,6 +393,24 @@ describe("IssuesPage", () => {
 
     render(<IssuesPage />);
 
+    expect(screen.getByText("My Issues")).toBeInTheDocument();
+    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Created")).toBeInTheDocument();
+    expect(screen.getByText("My Agents")).toBeInTheDocument();
+  });
+
+  it("switches to workspace mode and renders all issues", async () => {
+    mockStoreState.loading = false;
+    mockStoreState.issues = mockIssues;
+
+    const user = userEvent.setup();
+    render(<IssuesPage />);
+
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+
+    expect(screen.getByText("Design landing page")).toBeInTheDocument();
+    expect(screen.getByText("Write tests")).toBeInTheDocument();
     expect(screen.getByText("All")).toBeInTheDocument();
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
@@ -367,7 +433,6 @@ describe("IssuesPage", () => {
 
     render(<IssuesPage />);
 
-    // Should still render the board/list view, not a "no issues" message
-    expect(screen.queryByText("No matching issues")).not.toBeInTheDocument();
+    expect(screen.getByText("No issues assigned to you")).toBeInTheDocument();
   });
 });

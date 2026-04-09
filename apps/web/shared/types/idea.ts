@@ -9,6 +9,7 @@ export interface IdeaOSConfig {
 }
 
 export interface IdeaSummary {
+  id: string;
   code: string;
   slug: string;
   path: string;
@@ -19,6 +20,7 @@ export interface IdeaSummary {
   project_repo_url: string;
   project_repo_status: "creating" | "ready" | "failed";
   provisioning_error?: string;
+  project_spec_sync_error?: string;
   root_issue_id?: string;
   created_at: string;
   updated_at: string;

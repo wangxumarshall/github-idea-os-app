@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Check, ChevronRight, FolderGit2, Maximize2, Minimize2, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
+import type { IdeaSummary, IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
 import {
   Dialog,
   DialogContent,
@@ -86,13 +86,15 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
 
   const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const [ideas, setIdeas] = useState<IdeaSummary[]>([]);
+  const [loadingIdeas, setLoadingIdeas] = useState(false);
+  const [ideaId, setIdeaId] = useState<string | undefined>((data?.idea_id as string | undefined) || draft.ideaId);
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
-  const [repoUrl, setRepoUrl] = useState<string | null>((data?.repo_url as string | null) ?? null);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Assignee popover
@@ -123,9 +125,12 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
       : "Assignee";
 
   const dueDateObj = dueDate ? new Date(dueDate) : undefined;
-  const repoOptions = workspace?.repos ?? [];
+  const ideaLocked = !!data?.idea_id || !!data?.idea_slug;
+  const selectedIdea = ideas.find((idea) => idea.id === ideaId) ?? null;
+  const derivedRepoUrl = selectedIdea?.project_repo_url ?? null;
 
   // Sync field changes to draft store
+  const updateIdea = (id?: string) => { setIdeaId(id); setDraft({ ideaId: id }); };
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
   const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); };
@@ -135,26 +140,53 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
 
+  useEffect(() => {
+    void (async () => {
+      setLoadingIdeas(true);
+      try {
+        const nextIdeas = await api.listIdeas();
+        setIdeas(nextIdeas);
+        if (!ideaId && data?.idea_slug) {
+          const match = nextIdeas.find((idea) => idea.slug === data.idea_slug);
+          if (match) {
+            setIdeaId(match.id);
+            setDraft({ ideaId: match.id });
+          }
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load ideas");
+      } finally {
+        setLoadingIdeas(false);
+      }
+    })();
+  }, [data?.idea_id, data?.idea_slug, setDraft]);
+
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (!selectedIdea) {
+      toast.error("Select an idea first");
+      return;
+    }
+    if (!selectedIdea.root_issue_id) {
+      toast.error("This idea does not have a root issue yet");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
+        idea_id: selectedIdea.id,
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
-        parent_issue_id: (data?.parent_issue_id as string | undefined) || undefined,
-        repo_url: repoUrl || undefined,
+        parent_issue_id: selectedIdea.root_issue_id,
+        repo_url: selectedIdea.project_repo_url,
         due_date: dueDate || undefined,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
       };
-      const ideaSlug = data?.idea_slug as string | undefined;
-      const issue = ideaSlug
-        ? await api.createIdeaIssue(ideaSlug, payload)
-        : await api.createIssue(payload);
+      const issue = await api.createIssue(payload);
       useIssueStore.getState().addIssue(issue);
       clearDraft();
       onClose();
@@ -253,6 +285,17 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           />
         </div>
 
+        <div className="px-5 pb-2 text-xs text-muted-foreground">
+          {selectedIdea
+            ? `Idea: ${selectedIdea.code} · ${selectedIdea.title}`
+            : loadingIdeas
+              ? "Loading ideas..."
+              : "Select an idea before creating this issue."}
+          {selectedIdea && !selectedIdea.root_issue_id && (
+            <span className="ml-2 text-destructive">This idea does not have a root issue yet.</span>
+          )}
+        </div>
+
         {/* Description — takes remaining space */}
         <div className="flex-1 min-h-0 overflow-y-auto px-5">
           <ContentEditor
@@ -285,6 +328,30 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Idea */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton className={ideaLocked ? "cursor-default" : undefined} disabled={ideaLocked}>
+                  <span>{selectedIdea ? `${selectedIdea.code} · ${selectedIdea.title}` : loadingIdeas ? "Loading ideas..." : "Select idea"}</span>
+                </PillButton>
+              }
+            />
+            {!ideaLocked && (
+              <DropdownMenuContent align="start" className="w-80">
+                {ideas.map((idea) => (
+                  <DropdownMenuItem key={idea.id} onClick={() => updateIdea(idea.id)}>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{idea.code} · {idea.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">{idea.project_repo_url}</div>
+                    </div>
+                    {idea.id === ideaId && <Check className="ml-auto size-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            )}
           </DropdownMenu>
 
           {/* Priority */}
@@ -398,43 +465,10 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             </PopoverContent>
           </Popover>
 
-          {/* Repository */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <PillButton>
-                  <FolderGit2 className="size-3.5 text-muted-foreground" />
-                  <span>{repoLabel(repoUrl)}</span>
-                </PillButton>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-72">
-              <DropdownMenuItem onClick={() => setRepoUrl(null)}>
-                <FolderGit2 className="size-3.5 text-muted-foreground" />
-                <span>No repository</span>
-                {!repoUrl && <Check className="ml-auto size-3.5" />}
-              </DropdownMenuItem>
-              {repoUrl && !repoOptions.some((repo) => repo.url === repoUrl) && (
-                <DropdownMenuItem onClick={() => setRepoUrl(repoUrl)}>
-                  <FolderGit2 className="size-3.5 text-muted-foreground" />
-                  <div className="min-w-0 flex-1 truncate">{repoLabel(repoUrl)}</div>
-                  <Check className="ml-auto size-3.5" />
-                </DropdownMenuItem>
-              )}
-              {repoOptions.map((repo) => (
-                <DropdownMenuItem key={repo.url} onClick={() => setRepoUrl(repo.url)}>
-                  <FolderGit2 className="size-3.5 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate">{repoLabel(repo.url)}</div>
-                    {repo.description && (
-                      <div className="truncate text-xs text-muted-foreground">{repo.description}</div>
-                    )}
-                  </div>
-                  {repo.url === repoUrl && <Check className="ml-auto size-3.5" />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <PillButton disabled className="cursor-default">
+            <FolderGit2 className="size-3.5 text-muted-foreground" />
+            <span>{repoLabel(derivedRepoUrl)}</span>
+          </PillButton>
 
           {/* Due date */}
           <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
@@ -483,7 +517,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           <FileUploadButton
             onSelect={(file) => descEditorRef.current?.uploadFile(file)}
           />
-          <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+          <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting || !selectedIdea || !selectedIdea.root_issue_id}>
             {submitting ? "Creating..." : "Create Issue"}
           </Button>
         </div>

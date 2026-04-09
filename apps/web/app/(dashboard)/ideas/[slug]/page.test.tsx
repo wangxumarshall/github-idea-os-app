@@ -54,6 +54,7 @@ vi.mock("@/features/editor", () => ({
 }));
 
 const mockGetIdea = vi.hoisted(() => vi.fn());
+const mockGetIdeaIssues = vi.hoisted(() => vi.fn());
 const mockUpdateIdea = vi.hoisted(() => vi.fn());
 const mockRetryIdeaRepo = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
@@ -62,6 +63,7 @@ const mockToastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("@/shared/api", () => ({
   api: {
     getIdea: (...args: any[]) => mockGetIdea(...args),
+    getIdeaIssues: (...args: any[]) => mockGetIdeaIssues(...args),
     updateIdea: (...args: any[]) => mockUpdateIdea(...args),
     retryIdeaRepo: (...args: any[]) => mockRetryIdeaRepo(...args),
   },
@@ -77,6 +79,7 @@ vi.mock("sonner", () => ({
 import IdeaPage from "./page";
 
 const initialIdea: IdeaDocument = {
+  id: "idea-1",
   code: "idea0001",
   slug: "repo-brain",
   path: "ideas/repo-brain/repo-brain.md",
@@ -101,12 +104,14 @@ function sleep(ms: number) {
 describe("Idea editor autosave", () => {
   beforeEach(() => {
     mockGetIdea.mockReset();
+    mockGetIdeaIssues.mockReset();
     mockUpdateIdea.mockReset();
     mockRetryIdeaRepo.mockReset();
     mockToastError.mockReset();
     mockToastSuccess.mockReset();
     mockRetryIdeaRepo.mockResolvedValue({ message: "ok" });
     mockGetIdea.mockResolvedValue(initialIdea);
+    mockGetIdeaIssues.mockResolvedValue({ root_issue: null, child_issues: [] });
   });
 
   it("uses the latest synced sha for queued autosaves", async () => {

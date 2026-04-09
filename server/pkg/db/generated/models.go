@@ -154,27 +154,29 @@ type GithubAccount struct {
 }
 
 type Idea struct {
-	ID                pgtype.UUID        `json:"id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
-	GithubAccountID   pgtype.UUID        `json:"github_account_id"`
-	SeqNo             int32              `json:"seq_no"`
-	Code              string             `json:"code"`
-	SlugSuffix        string             `json:"slug_suffix"`
-	SlugFull          string             `json:"slug_full"`
-	Title             string             `json:"title"`
-	RawInput          string             `json:"raw_input"`
-	Summary           string             `json:"summary"`
-	Tags              []byte             `json:"tags"`
-	IdeaPath          string             `json:"idea_path"`
-	MarkdownSha       pgtype.Text        `json:"markdown_sha"`
-	ProjectRepoName   string             `json:"project_repo_name"`
-	ProjectRepoUrl    string             `json:"project_repo_url"`
-	ProjectRepoStatus string             `json:"project_repo_status"`
-	ProvisioningError pgtype.Text        `json:"provisioning_error"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	RootIssueID       pgtype.UUID        `json:"root_issue_id"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	OwnerUserID          pgtype.UUID        `json:"owner_user_id"`
+	GithubAccountID      pgtype.UUID        `json:"github_account_id"`
+	SeqNo                int32              `json:"seq_no"`
+	Code                 string             `json:"code"`
+	SlugSuffix           string             `json:"slug_suffix"`
+	SlugFull             string             `json:"slug_full"`
+	Title                string             `json:"title"`
+	RawInput             string             `json:"raw_input"`
+	Summary              string             `json:"summary"`
+	Tags                 []byte             `json:"tags"`
+	IdeaPath             string             `json:"idea_path"`
+	MarkdownSha          pgtype.Text        `json:"markdown_sha"`
+	ProjectRepoName      string             `json:"project_repo_name"`
+	ProjectRepoUrl       string             `json:"project_repo_url"`
+	ProjectRepoStatus    string             `json:"project_repo_status"`
+	ProvisioningError    pgtype.Text        `json:"provisioning_error"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	RootIssueID          pgtype.UUID        `json:"root_issue_id"`
+	ProjectSpecSha       pgtype.Text        `json:"project_spec_sha"`
+	ProjectSpecSyncError pgtype.Text        `json:"project_spec_sync_error"`
 }
 
 type IdeaJob struct {

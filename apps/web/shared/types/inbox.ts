@@ -31,6 +31,11 @@ export interface InboxItem {
   title: string;
   body: string | null;
   issue_status: IssueStatus | null;
+  idea_id?: string | null;
+  idea_slug?: string | null;
+  idea_code?: string | null;
+  idea_title?: string | null;
+  idea_is_system?: boolean;
   read: boolean;
   archived: boolean;
   created_at: string;

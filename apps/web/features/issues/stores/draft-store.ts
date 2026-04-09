@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import type { IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
 
 interface IssueDraft {
+  ideaId?: string;
   title: string;
   description: string;
   status: IssueStatus;
@@ -17,6 +18,7 @@ const EMPTY_DRAFT: IssueDraft = {
   description: "",
   status: "todo",
   priority: "none",
+  ideaId: undefined,
   assigneeType: undefined,
   assigneeId: undefined,
   dueDate: null,

@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -27,6 +28,11 @@ type InboxItemResponse struct {
 	Archived      bool            `json:"archived"`
 	CreatedAt     string          `json:"created_at"`
 	IssueStatus   *string         `json:"issue_status"`
+	IdeaID        *string         `json:"idea_id,omitempty"`
+	IdeaSlug      *string         `json:"idea_slug,omitempty"`
+	IdeaCode      *string         `json:"idea_code,omitempty"`
+	IdeaTitle     *string         `json:"idea_title,omitempty"`
+	IdeaIsSystem  bool            `json:"idea_is_system,omitempty"`
 	ActorType     *string         `json:"actor_type"`
 	ActorID       *string         `json:"actor_id"`
 	Details       json.RawMessage `json:"details"`
@@ -81,8 +87,24 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 	if err == nil {
 		s := issue.Status
 		resp.IssueStatus = &s
+		if issue.IdeaID.Valid {
+			if idea, err := h.IdeaStore.GetIdeaByID(ctx, h.DB, uuidToString(issue.IdeaID)); err == nil {
+				resp.IdeaID = issueStringPtr(idea.ID)
+				resp.IdeaSlug = issueStringPtr(idea.SlugFull)
+				resp.IdeaCode = issueStringPtr(idea.Code)
+				resp.IdeaTitle = issueStringPtr(idea.Title)
+				resp.IdeaIsSystem = dbIdeaIsSystem(idea)
+			}
+		}
 	}
 	return resp
+}
+
+func dbIdeaIsSystem(idea *service.IdeaRecord) bool {
+	if idea == nil {
+		return false
+	}
+	return service.IsLegacyIdea(idea.Code, idea.SlugFull)
 }
 
 func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +126,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
-		resp[i] = inboxRowToResponse(item)
+		resp[i] = h.enrichInboxResponse(r.Context(), inboxRowToResponse(item), item.IssueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

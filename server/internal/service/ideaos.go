@@ -21,8 +21,16 @@ import (
 const (
 	DefaultIdeaOSBranch    = "main"
 	DefaultIdeaOSDirectory = "ideas"
+	DefaultProjectSpecPath = "AGENTS.md"
+	LegacyIdeaCode         = "idea0000"
+	LegacyIdeaSlugSuffix   = "legacy-backfill"
 	defaultGitHubAPIBase   = "https://api.github.com"
 )
+
+func IsLegacyIdea(code, slug string) bool {
+	return strings.TrimSpace(code) == LegacyIdeaCode &&
+		strings.HasSuffix(strings.TrimSpace(slug), LegacyIdeaSlugSuffix)
+}
 
 type IdeaOSConfig struct {
 	RepoURL         string   `json:"repo_url"`
@@ -42,19 +50,21 @@ type PublicIdeaOSConfig struct {
 }
 
 type IdeaSummary struct {
-	Code              string   `json:"code"`
-	Slug              string   `json:"slug"`
-	Path              string   `json:"path"`
-	Title             string   `json:"title"`
-	Summary           string   `json:"summary"`
-	Tags              []string `json:"tags"`
-	ProjectRepoName   string   `json:"project_repo_name"`
-	ProjectRepoURL    string   `json:"project_repo_url"`
-	ProjectRepoStatus string   `json:"project_repo_status"`
-	ProvisioningError string   `json:"provisioning_error,omitempty"`
-	RootIssueID       string   `json:"root_issue_id,omitempty"`
-	CreatedAt         string   `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
+	ID                   string   `json:"id"`
+	Code                 string   `json:"code"`
+	Slug                 string   `json:"slug"`
+	Path                 string   `json:"path"`
+	Title                string   `json:"title"`
+	Summary              string   `json:"summary"`
+	Tags                 []string `json:"tags"`
+	ProjectRepoName      string   `json:"project_repo_name"`
+	ProjectRepoURL       string   `json:"project_repo_url"`
+	ProjectRepoStatus    string   `json:"project_repo_status"`
+	ProvisioningError    string   `json:"provisioning_error,omitempty"`
+	RootIssueID          string   `json:"root_issue_id,omitempty"`
+	ProjectSpecSyncError string   `json:"project_spec_sync_error,omitempty"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 type IdeaDocument struct {
@@ -139,6 +149,14 @@ type githubPutContentResponse struct {
 
 type githubErrorResponse struct {
 	Message string `json:"message"`
+}
+
+type IdeaProjectSpecConflictError struct {
+	Message string
+}
+
+func (e *IdeaProjectSpecConflictError) Error() string {
+	return e.Message
 }
 
 type GitHubAPIError struct {
@@ -654,6 +672,57 @@ func (s *GitHubIdeaOSService) PutMarkdownFile(ctx context.Context, cfg IdeaOSCon
 	return resp.Content.SHA, nil
 }
 
+func (s *GitHubIdeaOSService) SyncProjectRepoSpec(ctx context.Context, token, repoURL, markdown, sha, message string) (string, error) {
+	cfg := IdeaOSConfig{
+		RepoURL:     strings.TrimSpace(repoURL),
+		Branch:      DefaultIdeaOSBranch,
+		GitHubToken: strings.TrimSpace(token),
+	}
+	if err := validateIdeaOSConfig(cfg); err != nil {
+		return "", err
+	}
+
+	filePath := DefaultProjectSpecPath
+	desired := normalizeMarkdownForComparison(markdown)
+	currentSHA := strings.TrimSpace(sha)
+
+	if currentSHA == "" {
+		currentContent, latestSHA, err := s.GetMarkdownFile(ctx, cfg, filePath)
+		switch {
+		case err == nil:
+			if normalizeMarkdownForComparison(currentContent) == desired {
+				return latestSHA, nil
+			}
+			currentSHA = latestSHA
+		case !isGitHubNotFound(err):
+			return "", err
+		}
+	}
+
+	nextSHA, err := s.PutMarkdownFile(ctx, cfg, filePath, markdown, currentSHA, message)
+	if err == nil {
+		return nextSHA, nil
+	}
+	if !isGitHubSHAMismatch(err) {
+		return "", err
+	}
+
+	currentContent, latestSHA, latestErr := s.GetMarkdownFile(ctx, cfg, filePath)
+	if latestErr != nil {
+		return "", latestErr
+	}
+	if normalizeMarkdownForComparison(currentContent) == desired {
+		return latestSHA, nil
+	}
+	if currentSHA == "" {
+		return s.PutMarkdownFile(ctx, cfg, filePath, markdown, latestSHA, message)
+	}
+
+	return "", &IdeaProjectSpecConflictError{
+		Message: "AGENTS.md changed in the project repository; sync blocked until reconciled",
+	}
+}
+
 func (s *GitHubIdeaOSService) CreateRepository(ctx context.Context, token, repoName, visibility string) (GitHubRepository, error) {
 	reqBody := map[string]any{
 		"name":        strings.TrimSpace(repoName),
@@ -881,6 +950,19 @@ func isGitHubSHAMismatch(err error) bool {
 		return true
 	}
 	return ghErr.StatusCode == http.StatusConflict && strings.Contains(message, "sha")
+}
+
+func isGitHubNotFound(err error) bool {
+	var ghErr *GitHubAPIError
+	if !errors.As(err, &ghErr) {
+		return false
+	}
+	return ghErr.StatusCode == http.StatusNotFound
+}
+
+func normalizeMarkdownForComparison(markdown string) string {
+	markdown = strings.ReplaceAll(markdown, "\r\n", "\n")
+	return strings.TrimSpace(markdown)
 }
 
 func normalizeIdeaDate(value string) string {

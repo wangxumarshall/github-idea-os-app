@@ -132,12 +132,14 @@ export function IdeaOSTab() {
 
   if (!workspace) return null;
 
-  const toggleDefaultAgent = (agentId: string) => {
+  const setDefaultAgentChecked = (agentId: string, checked: boolean) => {
     setConfig((current) => ({
       ...current,
-      default_agent_ids: current.default_agent_ids.includes(agentId)
-        ? current.default_agent_ids.filter((id) => id !== agentId)
-        : [...current.default_agent_ids, agentId],
+      default_agent_ids: checked
+        ? current.default_agent_ids.includes(agentId)
+          ? current.default_agent_ids
+          : [...current.default_agent_ids, agentId]
+        : current.default_agent_ids.filter((id) => id !== agentId),
     }));
   };
 
@@ -268,9 +270,10 @@ export function IdeaOSTab() {
                     return (
                       <label key={agent.id} className="flex items-start gap-3 rounded-lg px-2 py-2 text-sm hover:bg-accent/30">
                         <Checkbox
+                          aria-label={agent.name}
                           checked={checked}
                           disabled={!canManageWorkspace || loading}
-                          onCheckedChange={() => toggleDefaultAgent(agent.id)}
+                          onCheckedChange={(nextChecked) => setDefaultAgentChecked(agent.id, nextChecked === true)}
                         />
                         <div className="space-y-1">
                           <div className="font-medium">{agent.name}</div>

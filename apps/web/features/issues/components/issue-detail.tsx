@@ -1028,38 +1028,45 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </PropRow>
 
               <PropRow label="Repository">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex min-w-0 items-center gap-1.5 rounded px-1 -mx-1 hover:bg-accent/30 transition-colors">
+                {issue.idea_slug ? (
+                  <div className="flex min-w-0 items-center gap-1.5 px-1">
                     <FolderGit2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="truncate">{repoLabel(issue.repo_url)}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-72">
-                    <DropdownMenuItem onClick={() => handleUpdateField({ repo_url: null })}>
-                      <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>No repository</span>
-                      {!issue.repo_url && <Check className="ml-auto h-3.5 w-3.5" />}
-                    </DropdownMenuItem>
-                    {issue.repo_url && !workspaceRepos.some((repo) => repo.url === issue.repo_url) && (
-                      <DropdownMenuItem onClick={() => handleUpdateField({ repo_url: issue.repo_url })}>
+                  </div>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="flex min-w-0 items-center gap-1.5 rounded px-1 -mx-1 hover:bg-accent/30 transition-colors">
+                      <FolderGit2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{repoLabel(issue.repo_url)}</span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-72">
+                      <DropdownMenuItem onClick={() => handleUpdateField({ repo_url: null })}>
                         <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="truncate">{repoLabel(issue.repo_url)}</span>
-                        <Check className="ml-auto h-3.5 w-3.5" />
+                        <span>No repository</span>
+                        {!issue.repo_url && <Check className="ml-auto h-3.5 w-3.5" />}
                       </DropdownMenuItem>
-                    )}
-                    {workspaceRepos.map((repo) => (
-                      <DropdownMenuItem key={repo.url} onClick={() => handleUpdateField({ repo_url: repo.url })}>
-                        <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate">{repoLabel(repo.url)}</div>
-                          {repo.description && (
-                            <div className="truncate text-xs text-muted-foreground">{repo.description}</div>
-                          )}
-                        </div>
-                        {repo.url === issue.repo_url && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      {issue.repo_url && !workspaceRepos.some((repo) => repo.url === issue.repo_url) && (
+                        <DropdownMenuItem onClick={() => handleUpdateField({ repo_url: issue.repo_url })}>
+                          <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="truncate">{repoLabel(issue.repo_url)}</span>
+                          <Check className="ml-auto h-3.5 w-3.5" />
+                        </DropdownMenuItem>
+                      )}
+                      {workspaceRepos.map((repo) => (
+                        <DropdownMenuItem key={repo.url} onClick={() => handleUpdateField({ repo_url: repo.url })}>
+                          <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate">{repoLabel(repo.url)}</div>
+                            {repo.description && (
+                              <div className="truncate text-xs text-muted-foreground">{repo.description}</div>
+                            )}
+                          </div>
+                          {repo.url === issue.repo_url && <Check className="ml-auto h-3.5 w-3.5" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </PropRow>
             </div>}
           </div>
@@ -1091,9 +1098,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </PropRow>
               {issue.idea_slug && (
                 <PropRow label="Idea">
-                  <Link href={`/ideas/${issue.idea_slug}`} className="truncate text-primary hover:underline">
-                    {issue.idea_code ? `${issue.idea_code} · ${issue.idea_title ?? issue.idea_slug}` : issue.idea_title ?? issue.idea_slug}
-                  </Link>
+                  {issue.idea_is_system ? (
+                    <span className="truncate text-muted-foreground">
+                      {issue.idea_title ?? "Legacy Issues"}
+                    </span>
+                  ) : (
+                    <Link href={`/ideas/${issue.idea_slug}`} className="truncate text-primary hover:underline">
+                      {issue.idea_code ? `${issue.idea_code} · ${issue.idea_title ?? issue.idea_slug}` : issue.idea_title ?? issue.idea_slug}
+                    </Link>
+                  )}
                 </PropRow>
               )}
               {issue.idea_root_issue_id && issue.idea_root_issue_id !== issue.id && (

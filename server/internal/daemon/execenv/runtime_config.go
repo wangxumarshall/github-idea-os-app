@@ -71,7 +71,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			if ctx.SelectedRepoDescription != "" {
 				fmt.Fprintf(&b, "- Description: %s\n", ctx.SelectedRepoDescription)
 			}
-			b.WriteString("\n")
+			b.WriteString("- Constraint: You must only use this repository for code changes in this issue.\n\n")
 		}
 		if len(ctx.Repos) > 0 {
 			b.WriteString("| URL | Description |\n")
@@ -128,6 +128,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {
 			if ctx.SelectedRepoURL != "" {
 				fmt.Fprintf(&b, "   a. Run `multica repo checkout %s`\n", ctx.SelectedRepoURL)
+				b.WriteString("   a1. Do not check out any other repository for this issue\n")
 			} else {
 				b.WriteString("   a. Run `multica repo checkout <url>` to check out the appropriate repository\n")
 			}

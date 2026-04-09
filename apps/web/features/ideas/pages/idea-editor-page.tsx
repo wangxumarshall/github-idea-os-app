@@ -81,8 +81,17 @@ export function IdeaEditorPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const nextIdea = await api.getIdea(slug);
+        const [nextIdea, nextIdeaIssues] = await Promise.all([
+          api.getIdea(slug),
+          api.getIdeaIssues(slug).catch(() => ({ root_issue: null, child_issues: [] })),
+        ]);
         if (cancelled) return;
+        if (nextIdeaIssues.root_issue) {
+          useIssueStore.getState().addIssue(nextIdeaIssues.root_issue);
+        }
+        for (const issue of nextIdeaIssues.child_issues) {
+          useIssueStore.getState().addIssue(issue);
+        }
         ideaRef.current = nextIdea;
         syncedIdeaRef.current = nextIdea;
         setIdea(nextIdea);
@@ -220,9 +229,8 @@ export function IdeaEditorPage() {
   const openIdeaIssueModal = (kind: "bug" | "feature" | "stability") => {
     if (!idea) return;
     useModalStore.getState().open("create-issue", {
+      idea_id: idea.id,
       idea_slug: idea.slug,
-      parent_issue_id: idea.root_issue_id,
-      repo_url: idea.project_repo_url,
       status: "todo",
       kind,
     });
@@ -343,6 +351,12 @@ export function IdeaEditorPage() {
                     {retryingRepo ? "Retrying..." : "Retry repo creation"}
                   </Button>
                 </>
+              )}
+              {idea.project_spec_sync_error && (
+                <span className="inline-flex items-center gap-1 text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  AGENTS.md sync failed: {idea.project_spec_sync_error}
+                </span>
               )}
             </div>
           </div>

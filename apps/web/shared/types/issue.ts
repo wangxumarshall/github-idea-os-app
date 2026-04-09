@@ -39,6 +39,7 @@ export interface Issue {
   idea_slug?: string | null;
   idea_code?: string | null;
   idea_title?: string | null;
+  idea_is_system?: boolean;
   idea_root_issue_id?: string | null;
   idea_root_identifier?: string | null;
   idea_root_title?: string | null;

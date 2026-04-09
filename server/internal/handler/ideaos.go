@@ -78,6 +78,7 @@ func buildIdeaRootIssueDescription(idea service.IdeaRecord) string {
 	b.WriteString("- Idea markdown: `" + idea.IdeaPath + "`\n")
 	if strings.TrimSpace(idea.ProjectRepoURL) != "" {
 		b.WriteString("- Project repository: " + strings.TrimSpace(idea.ProjectRepoURL) + "\n")
+		b.WriteString("- Project instructions path: `AGENTS.md`\n")
 	}
 	b.WriteString("\n## Workflow\n\n")
 	b.WriteString("1. Run `multica idea get " + idea.SlugFull + " --output json`\n")
@@ -91,6 +92,31 @@ func buildIdeaRootIssueDescription(idea service.IdeaRecord) string {
 	}
 
 	return b.String()
+}
+
+func (h *Handler) syncIdeaProjectSpec(ctx context.Context, cfg service.IdeaOSConfig, record *service.IdeaRecord, doc service.IdeaDocument, dbtx db.DBTX) error {
+	if record == nil {
+		return nil
+	}
+	if strings.TrimSpace(record.ProjectRepoURL) == "" || record.ProjectRepoStatus != "ready" {
+		return nil
+	}
+
+	rendered, err := service.RenderIdeaDocument(doc)
+	if err != nil {
+		return err
+	}
+
+	newSHA, err := h.IdeaOS.SyncProjectRepoSpec(ctx, cfg.GitHubToken, record.ProjectRepoURL, rendered, record.ProjectSpecSHA, "sync idea AGENTS: "+record.SlugFull)
+	if err != nil {
+		record.ProjectSpecSyncError = err.Error()
+		_ = h.IdeaStore.UpdateIdeaProjectSpecState(ctx, dbtx, record.ID, record.ProjectSpecSHA, record.ProjectSpecSyncError)
+		return err
+	}
+
+	record.ProjectSpecSHA = newSHA
+	record.ProjectSpecSyncError = ""
+	return h.IdeaStore.UpdateIdeaProjectSpecState(ctx, dbtx, record.ID, newSHA, "")
 }
 
 func (h *Handler) validateDefaultIdeaAgentIDs(r *http.Request, workspaceID string, ids []string) ([]string, error) {
@@ -339,20 +365,25 @@ func (h *Handler) ListIdeas(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]service.IdeaSummary, 0, len(ideas))
 	for _, idea := range ideas {
+		if service.IsLegacyIdea(idea.Code, idea.SlugFull) {
+			continue
+		}
 		resp = append(resp, service.IdeaSummary{
-			Code:              idea.Code,
-			Slug:              idea.SlugFull,
-			Path:              idea.IdeaPath,
-			Title:             idea.Title,
-			Summary:           idea.Summary,
-			Tags:              idea.Tags,
-			ProjectRepoName:   idea.ProjectRepoName,
-			ProjectRepoURL:    idea.ProjectRepoURL,
-			ProjectRepoStatus: idea.ProjectRepoStatus,
-			ProvisioningError: idea.ProvisioningError,
-			RootIssueID:       idea.RootIssueID,
-			CreatedAt:         idea.CreatedAt.Format("2006-01-02"),
-			UpdatedAt:         idea.UpdatedAt.Format("2006-01-02"),
+			ID:                   idea.ID,
+			Code:                 idea.Code,
+			Slug:                 idea.SlugFull,
+			Path:                 idea.IdeaPath,
+			Title:                idea.Title,
+			Summary:              idea.Summary,
+			Tags:                 idea.Tags,
+			ProjectRepoName:      idea.ProjectRepoName,
+			ProjectRepoURL:       idea.ProjectRepoURL,
+			ProjectRepoStatus:    idea.ProjectRepoStatus,
+			ProvisioningError:    idea.ProvisioningError,
+			RootIssueID:          idea.RootIssueID,
+			ProjectSpecSyncError: idea.ProjectSpecSyncError,
+			CreatedAt:            idea.CreatedAt.Format("2006-01-02"),
+			UpdatedAt:            idea.UpdatedAt.Format("2006-01-02"),
 		})
 	}
 
@@ -502,6 +533,7 @@ func (h *Handler) CreateIdea(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parsed.SHA = sha
+	parsed.ID = record.ID
 	parsed.Code = code
 	parsed.Slug = slugFull
 	parsed.Path = doc.Path
@@ -509,6 +541,7 @@ func (h *Handler) CreateIdea(w http.ResponseWriter, r *http.Request) {
 	parsed.ProjectRepoURL = projectRepoURL
 	parsed.ProjectRepoStatus = "creating"
 	parsed.RootIssueID = uuidToString(rootIssue.ID)
+	parsed.ProjectSpecSyncError = record.ProjectSpecSyncError
 
 	rootResp := h.ideaIssueResponse(r.Context(), rootIssue)
 	h.publish(protocol.EventIssueCreated, workspaceID, "member", userID, map[string]any{"issue": rootResp})
@@ -538,12 +571,14 @@ func (h *Handler) GetIdea(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to parse idea markdown")
 		return
 	}
+	doc.ID = record.ID
 	doc.Code = record.Code
 	doc.ProjectRepoName = record.ProjectRepoName
 	doc.ProjectRepoURL = record.ProjectRepoURL
 	doc.ProjectRepoStatus = record.ProjectRepoStatus
 	doc.ProvisioningError = record.ProvisioningError
 	doc.RootIssueID = record.RootIssueID
+	doc.ProjectSpecSyncError = record.ProjectSpecSyncError
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -595,7 +630,11 @@ func (h *Handler) UpdateIdea(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update idea metadata")
 		return
 	}
+	if err := h.syncIdeaProjectSpec(r.Context(), cfg, record, parsed, h.DB); err != nil {
+		parsed.ProjectSpecSyncError = err.Error()
+	}
 
+	parsed.ID = record.ID
 	parsed.Code = record.Code
 	parsed.Slug = record.SlugFull
 	parsed.Path = record.IdeaPath
@@ -604,6 +643,9 @@ func (h *Handler) UpdateIdea(w http.ResponseWriter, r *http.Request) {
 	parsed.ProjectRepoStatus = record.ProjectRepoStatus
 	parsed.ProvisioningError = record.ProvisioningError
 	parsed.RootIssueID = record.RootIssueID
+	if parsed.ProjectSpecSyncError == "" {
+		parsed.ProjectSpecSyncError = record.ProjectSpecSyncError
+	}
 	writeJSON(w, http.StatusOK, parsed)
 }
 
@@ -696,10 +738,12 @@ func (h *Handler) CreateIdeaIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.RepoURL == nil || strings.TrimSpace(*req.RepoURL) == "" {
-		req.RepoURL = stringPtr(record.ProjectRepoURL)
-	}
+	req.IdeaID = stringPtr(record.ID)
 	req.ParentIssueID = stringPtr(record.RootIssueID)
+	if err := bindCreateIssueToIdea(&req, record); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if req.AssigneeType != nil && *req.AssigneeType == "agent" && req.AssigneeID != nil {
 		if ok, msg := h.canAssignAgent(r.Context(), r, *req.AssigneeID, workspaceID); !ok {

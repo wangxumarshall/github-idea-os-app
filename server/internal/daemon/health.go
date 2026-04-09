@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -99,6 +100,10 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
 		}
+		if req.TaskID == "" {
+			http.Error(w, "task_id is required", http.StatusBadRequest)
+			return
+		}
 		if req.WorkDir == "" {
 			http.Error(w, "workdir is required", http.StatusBadRequest)
 			return
@@ -106,6 +111,18 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		d.mu.Lock()
+		allowedRepo := d.activeTaskRepos[req.TaskID]
+		d.mu.Unlock()
+		if strings.TrimSpace(allowedRepo) == "" {
+			http.Error(w, "repo checkout is not allowed for this task", http.StatusForbidden)
+			return
+		}
+		if strings.TrimSpace(req.URL) != strings.TrimSpace(allowedRepo) {
+			http.Error(w, "repo checkout is restricted to the issue repository", http.StatusForbidden)
 			return
 		}
 

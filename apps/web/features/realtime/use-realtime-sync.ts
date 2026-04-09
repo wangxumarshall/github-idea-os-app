@@ -110,7 +110,7 @@ export function useRealtimeSync(ws: WSClient | null) {
 
     const unsubInboxNew = ws.on("inbox:new", (p) => {
       const { item } = p as InboxNewPayload;
-      if (item) useInboxStore.getState().addItem(item);
+      if (item) void useInboxStore.getState().fetch();
     });
 
     // --- Side-effect handlers (toast, navigation) ---

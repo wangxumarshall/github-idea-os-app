@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useInboxStore } from "@/features/inbox";
@@ -10,13 +10,13 @@ import { useActorName } from "@/features/workspace";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { toast } from "sonner";
 import {
-  ArrowRight,
   MoreHorizontal,
   Inbox,
   CheckCheck,
   Archive,
   BookCheck,
   ListChecks,
+  Lightbulb,
 } from "lucide-react";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@/shared/types";
 import { Button } from "@/components/ui/button";
@@ -214,6 +214,22 @@ function InboxListItem({
   );
 }
 
+function groupLabel(item: InboxItem): string {
+  if (item.idea_is_system) {
+    return item.idea_title ?? "Legacy Issues";
+  }
+  if (item.idea_code && item.idea_title) {
+    return `${item.idea_code} · ${item.idea_title}`;
+  }
+  if (item.idea_title) {
+    return item.idea_title;
+  }
+  if (item.idea_slug) {
+    return item.idea_slug;
+  }
+  return "Unlinked Issues";
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -244,6 +260,40 @@ export default function InboxPage() {
 
   const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const unreadCount = items.filter((i) => !i.read).length;
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; items: InboxItem[]; unreadCount: number; latestAt: number }>();
+
+    for (const item of items) {
+      const key = item.idea_id ?? `unlinked:${item.issue_id ?? item.id}`;
+      const existing = groups.get(key);
+      const latestAt = new Date(item.created_at).getTime();
+      if (existing) {
+        existing.items.push(item);
+        existing.latestAt = Math.max(existing.latestAt, latestAt);
+        if (!item.read) {
+          existing.unreadCount += 1;
+        }
+        continue;
+      }
+
+      groups.set(key, {
+        key,
+        label: groupLabel(item),
+        items: [item],
+        unreadCount: item.read ? 0 : 1,
+        latestAt,
+      });
+    }
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        items: group.items.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        ),
+      }))
+      .sort((a, b) => b.latestAt - a.latestAt);
+  }, [items]);
 
   // Click-to-read: select + auto-mark-read
   const handleSelect = async (item: InboxItem) => {
@@ -402,15 +452,29 @@ export default function InboxPage() {
             <p className="text-sm">No notifications</p>
           </div>
         ) : (
-          <div>
-            {items.map((item) => (
-              <InboxListItem
-                key={item.id}
-                item={item}
-                isSelected={(item.issue_id ?? item.id) === selectedKey}
-                onClick={() => handleSelect(item)}
-                onArchive={() => handleArchive(item.id)}
-              />
+          <div className="divide-y divide-border/60">
+            {groupedItems.map((group) => (
+              <section key={group.key}>
+                <div className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-muted-foreground">
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  <span className="truncate">{group.label}</span>
+                  {group.unreadCount > 0 && (
+                    <span className="ml-auto text-[11px]">{group.unreadCount}</span>
+                  )}
+                </div>
+                <div className="pb-1">
+                  {group.items.map((item) => (
+                    <div key={item.id} className="ml-4 border-l border-border/60 pl-2">
+                      <InboxListItem
+                        item={item}
+                        isSelected={(item.issue_id ?? item.id) === selectedKey}
+                        onClick={() => handleSelect(item)}
+                        onArchive={() => handleArchive(item.id)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}

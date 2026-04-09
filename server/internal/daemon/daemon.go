@@ -31,10 +31,11 @@ type Daemon struct {
 	repoCache *repocache.Cache
 	logger    *slog.Logger
 
-	mu           sync.Mutex
-	workspaces   map[string]*workspaceState
-	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
-	reloading    sync.Mutex         // prevents concurrent reloadWorkspaces
+	mu              sync.Mutex
+	workspaces      map[string]*workspaceState
+	runtimeIndex    map[string]Runtime // runtimeID -> Runtime for provider lookups
+	activeTaskRepos map[string]string
+	reloading       sync.Mutex // prevents concurrent reloadWorkspaces
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
@@ -45,12 +46,13 @@ type Daemon struct {
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
 	return &Daemon{
-		cfg:          cfg,
-		client:       NewClient(cfg.ServerBaseURL),
-		repoCache:    repocache.New(cacheRoot, logger),
-		logger:       logger,
-		workspaces:   make(map[string]*workspaceState),
-		runtimeIndex: make(map[string]Runtime),
+		cfg:             cfg,
+		client:          NewClient(cfg.ServerBaseURL),
+		repoCache:       repocache.New(cacheRoot, logger),
+		logger:          logger,
+		workspaces:      make(map[string]*workspaceState),
+		runtimeIndex:    make(map[string]Runtime),
+		activeTaskRepos: make(map[string]string),
 	}
 }
 
@@ -914,6 +916,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// task completion and passed back via PriorWorkDir on the next claim.
 
 	prompt := BuildPrompt(task)
+
+	if task.SelectedRepoURL != "" {
+		d.mu.Lock()
+		d.activeTaskRepos[task.ID] = task.SelectedRepoURL
+		d.mu.Unlock()
+		defer func() {
+			d.mu.Lock()
+			delete(d.activeTaskRepos, task.ID)
+			d.mu.Unlock()
+		}()
+	}
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).

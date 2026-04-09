@@ -41,6 +41,7 @@ type IssueResponse struct {
 	IdeaSlug           *string                 `json:"idea_slug,omitempty"`
 	IdeaCode           *string                 `json:"idea_code,omitempty"`
 	IdeaTitle          *string                 `json:"idea_title,omitempty"`
+	IdeaIsSystem       bool                    `json:"idea_is_system,omitempty"`
 	IdeaRootIssueID    *string                 `json:"idea_root_issue_id,omitempty"`
 	IdeaRootIdentifier *string                 `json:"idea_root_identifier,omitempty"`
 	IdeaRootTitle      *string                 `json:"idea_root_title,omitempty"`
@@ -49,6 +50,14 @@ type IssueResponse struct {
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+}
+
+func issueStringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 type agentTriggerSnapshot struct {
@@ -96,6 +105,7 @@ func issueToResponse(i db.Issue, issuePrefix string, idea *service.IdeaRecord, r
 		resp.IdeaSlug = &idea.SlugFull
 		resp.IdeaCode = &idea.Code
 		resp.IdeaTitle = &idea.Title
+		resp.IdeaIsSystem = service.IsLegacyIdea(idea.Code, idea.SlugFull)
 		if idea.RootIssueID != "" {
 			resp.IdeaRootIssueID = &idea.RootIssueID
 			resp.IsIdeaRoot = idea.RootIssueID == resp.ID
@@ -218,6 +228,34 @@ func (h *Handler) issueResponse(ctx context.Context, issue db.Issue, issuePrefix
 	return issueToResponse(issue, issuePrefix, idea, rootIssue)
 }
 
+func (h *Handler) loadIdeaForCreate(ctx context.Context, workspaceID string, ideaID string) (*service.IdeaRecord, error) {
+	idea, err := h.IdeaStore.GetIdeaByID(ctx, h.DB, strings.TrimSpace(ideaID))
+	if err != nil {
+		return nil, fmt.Errorf("idea not found")
+	}
+	if idea.WorkspaceID != workspaceID {
+		return nil, fmt.Errorf("idea not found")
+	}
+	return idea, nil
+}
+
+func bindCreateIssueToIdea(req *CreateIssueRequest, idea *service.IdeaRecord) error {
+	if idea == nil {
+		return fmt.Errorf("idea is required")
+	}
+	if strings.TrimSpace(idea.RootIssueID) == "" {
+		return fmt.Errorf("idea root issue is not initialized")
+	}
+	if req.ParentIssueID == nil {
+		req.ParentIssueID = issueStringPtr(idea.RootIssueID)
+	} else if strings.TrimSpace(*req.ParentIssueID) != idea.RootIssueID {
+		return fmt.Errorf("issues can only be created under the idea root issue")
+	}
+
+	req.RepoURL = issueStringPtr(idea.ProjectRepoURL)
+	return nil
+}
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -309,6 +347,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateIssueRequest struct {
+	IdeaID        *string  `json:"idea_id"`
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
 	Status        string   `json:"status"`
@@ -333,7 +372,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-
 	workspaceID := resolveWorkspaceID(r)
 
 	// Get creator from context (set by auth middleware)
@@ -356,6 +394,27 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if _, err := parseIssueDueDate(req.DueDate); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if req.IdeaID != nil && strings.TrimSpace(*req.IdeaID) != "" {
+		idea, err := h.loadIdeaForCreate(r.Context(), workspaceID, *req.IdeaID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := bindCreateIssueToIdea(&req, idea); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		legacyIdea, err := h.IdeaStore.EnsureLegacyIdea(r.Context(), h.DB, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve default idea")
+			return
+		}
+		req.IdeaID = issueStringPtr(legacyIdea.ID)
+		if strings.TrimSpace(legacyIdea.ProjectRepoURL) != "" {
+			req.RepoURL = issueStringPtr(legacyIdea.ProjectRepoURL)
+		}
 	}
 
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
@@ -386,7 +445,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
-	issue, err := h.createIssueRecord(r.Context(), qtx, workspaceID, creatorType, actualCreatorID, req, issueNumber, nil)
+	issue, err := h.createIssueRecord(r.Context(), qtx, workspaceID, creatorType, actualCreatorID, req, issueNumber, req.IdeaID)
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -524,10 +583,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := rawFields["repo_url"]; ok {
-		if req.RepoURL != nil {
-			params.RepoUrl = textFromOptionalString(req.RepoURL)
+		if prevIssue.IdeaID.Valid {
+			idea, err := h.IdeaStore.GetIdeaByID(r.Context(), h.DB, uuidToString(prevIssue.IdeaID))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "idea not found")
+				return
+			}
+			requestedRepo := ""
+			if req.RepoURL != nil {
+				requestedRepo = strings.TrimSpace(*req.RepoURL)
+			}
+			if requestedRepo != strings.TrimSpace(idea.ProjectRepoURL) {
+				writeError(w, http.StatusBadRequest, "idea-bound issue repository is fixed to the idea project repository")
+				return
+			}
+			params.RepoUrl = pgtype.Text{String: strings.TrimSpace(idea.ProjectRepoURL), Valid: idea.ProjectRepoURL != ""}
 		} else {
-			params.RepoUrl = pgtype.Text{Valid: false}
+			if req.RepoURL != nil {
+				params.RepoUrl = textFromOptionalString(req.RepoURL)
+			} else {
+				params.RepoUrl = pgtype.Text{Valid: false}
+			}
 		}
 	}
 

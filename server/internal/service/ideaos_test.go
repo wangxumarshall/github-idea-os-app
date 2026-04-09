@@ -444,6 +444,108 @@ func TestGitHubIdeaOSServiceUpdateIdeaReturnsConflictOnUserEdit(t *testing.T) {
 	}
 }
 
+func TestSyncProjectRepoSpecWritesRootAgentsFile(t *testing.T) {
+	const expectedMarkdown = "# Idea Delivery\n\nUse this repository for implementation.\n"
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/AGENTS.md"):
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/AGENTS.md"):
+			var req githubPutContentRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode put request: %v", err)
+			}
+			content, err := base64.StdEncoding.DecodeString(req.Content)
+			if err != nil {
+				t.Fatalf("decode content: %v", err)
+			}
+			if string(content) != expectedMarkdown {
+				t.Fatalf("expected AGENTS.md content %q, got %q", expectedMarkdown, string(content))
+			}
+			writeJSONFixture(w, map[string]any{
+				"content": map[string]any{
+					"name": "AGENTS.md",
+					"path": "AGENTS.md",
+					"sha":  "sha-agents",
+				},
+			})
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	svc := &GitHubIdeaOSService{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+
+	sha, err := svc.SyncProjectRepoSpec(
+		context.Background(),
+		"ghp_test",
+		"https://github.com/example/repo-brain",
+		expectedMarkdown,
+		"",
+		"sync idea AGENTS: idea0001-repo-brain",
+	)
+	if err != nil {
+		t.Fatalf("SyncProjectRepoSpec: %v", err)
+	}
+	if sha != "sha-agents" {
+		t.Fatalf("expected sha-agents, got %q", sha)
+	}
+}
+
+func TestSyncProjectRepoSpecReturnsConflictWhenAgentsFileChanged(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/contents/AGENTS.md"):
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"message": "AGENTS.md does not match sha-stale",
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/contents/AGENTS.md"):
+			writeJSONFixture(w, map[string]any{
+				"name":     "AGENTS.md",
+				"path":     "AGENTS.md",
+				"sha":      "sha-latest",
+				"encoding": "base64",
+				"content":  base64.StdEncoding.EncodeToString([]byte("# Manual instructions\n\nDo not overwrite.\n")),
+			})
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	svc := &GitHubIdeaOSService{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+
+	_, err := svc.SyncProjectRepoSpec(
+		context.Background(),
+		"ghp_test",
+		"https://github.com/example/repo-brain",
+		"# Idea Delivery\n\nSync this file.\n",
+		"sha-stale",
+		"sync idea AGENTS: idea0001-repo-brain",
+	)
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+
+	var conflictErr *IdeaProjectSpecConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("expected IdeaProjectSpecConflictError, got %T: %v", err, err)
+	}
+}
+
 func frontmatterFixture(title, created, updated string, tags []string, body string) string {
 	doc, _ := RenderIdeaDocument(IdeaDocument{
 		IdeaSummary: IdeaSummary{

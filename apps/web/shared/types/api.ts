@@ -37,6 +37,7 @@ export interface UpdateIdeaRequest {
 
 // Issue API
 export interface CreateIssuePayload {
+  idea_id: string;
   title: string;
   description?: string;
   status?: IssueStatus;

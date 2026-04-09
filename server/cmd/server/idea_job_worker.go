@@ -105,6 +105,9 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 	if err := syncIdeaRepoStatus(ctx, queries, gh, oauth, pool, idea, "ready", repo.HTMLURL, ""); err != nil {
 		slog.Warn("idea job worker: sync markdown status failed", "idea_id", idea.ID, "error", err)
 	}
+	if err := syncIdeaProjectSpec(ctx, store, gh, cfg, pool, idea); err != nil {
+		slog.Warn("idea job worker: sync project spec failed", "idea_id", idea.ID, "error", err)
+	}
 	if err := enqueueIdeaRootIssueIfReady(ctx, queries, idea); err != nil {
 		slog.Warn("idea job worker: enqueue root issue failed", "idea_id", idea.ID, "error", err)
 	}
@@ -115,6 +118,9 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 
 func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea *service.IdeaRecord) error {
 	if idea.RootIssueID == "" {
+		return nil
+	}
+	if idea.ProjectSpecSyncError != "" {
 		return nil
 	}
 
@@ -152,6 +158,24 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 		Priority:  priorityToQueueValue(issue.Priority),
 	})
 	return err
+}
+
+func syncIdeaProjectSpec(ctx context.Context, store *service.IdeaStore, gh *service.GitHubIdeaOSService, cfg service.IdeaOSConfig, pool db.DBTX, idea *service.IdeaRecord) error {
+	content, _, err := gh.GetMarkdownFile(ctx, cfg, idea.IdeaPath)
+	if err != nil {
+		return err
+	}
+
+	newSHA, err := gh.SyncProjectRepoSpec(ctx, cfg.GitHubToken, idea.ProjectRepoURL, content, idea.ProjectSpecSHA, "sync idea AGENTS: "+idea.SlugFull)
+	if err != nil {
+		idea.ProjectSpecSyncError = err.Error()
+		_ = store.UpdateIdeaProjectSpecState(ctx, pool, idea.ID, idea.ProjectSpecSHA, idea.ProjectSpecSyncError)
+		return err
+	}
+
+	idea.ProjectSpecSHA = newSHA
+	idea.ProjectSpecSyncError = ""
+	return store.UpdateIdeaProjectSpecState(ctx, pool, idea.ID, newSHA, "")
 }
 
 func syncIdeaRepoStatus(ctx context.Context, queries *db.Queries, gh *service.GitHubIdeaOSService, oauth *service.GitHubOAuthService, pool db.DBTX, idea *service.IdeaRecord, status, repoURL, reason string) error {
