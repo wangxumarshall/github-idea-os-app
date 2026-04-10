@@ -34,10 +34,17 @@ func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskServ
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForIssueInMode(ctx, issue, PreferredTaskMode(issue), triggerCommentID...)
+}
+
+// EnqueueTaskForIssueInMode creates a queued task for an agent-assigned issue
+// in the explicitly requested execution mode.
+func (s *TaskService) EnqueueTaskForIssueInMode(ctx context.Context, issue db.Issue, mode string, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
 	}
+	mode = NormalizeTaskMode(mode)
 
 	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil {
@@ -58,11 +65,16 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 		commentID = triggerCommentID[0]
 	}
 
+	if _, _, err := s.setIssueExecutionStage(ctx, issue, QueueStageForMode(mode)); err != nil {
+		slog.Warn("task enqueue: failed to update execution stage", "issue_id", util.UUIDToString(issue.ID), "mode", mode, "error", err)
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:          issue.AssigneeID,
 		RuntimeID:        agent.RuntimeID,
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
+		Mode:             mode,
 		TriggerCommentID: commentID,
 	})
 	if err != nil {
@@ -78,6 +90,13 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForMentionInMode(ctx, issue, agentID, PreferredTaskMode(issue), triggerCommentID)
+}
+
+// EnqueueTaskForMentionInMode creates a queued task for a mentioned agent in
+// the explicitly requested execution mode.
+func (s *TaskService) EnqueueTaskForMentionInMode(ctx context.Context, issue db.Issue, agentID pgtype.UUID, mode string, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	mode = NormalizeTaskMode(mode)
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -92,11 +111,16 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	if _, _, err := s.setIssueExecutionStage(ctx, issue, QueueStageForMode(mode)); err != nil {
+		slog.Warn("mention task enqueue: failed to update execution stage", "issue_id", util.UUIDToString(issue.ID), "mode", mode, "error", err)
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:          agentID,
 		RuntimeID:        agent.RuntimeID,
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
+		Mode:             mode,
 		TriggerCommentID: triggerCommentID,
 	})
 	if err != nil {
@@ -125,6 +149,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
+	s.syncIssueExecutionStageForTask(ctx, task, FailedStageForMode(task.Mode))
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
@@ -205,6 +230,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 		return nil, fmt.Errorf("start task: %w", err)
 	}
 
+	s.syncIssueExecutionStageForTask(ctx, task, RunningStageForMode(task.Mode))
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	return &task, nil
 }
@@ -237,6 +263,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	}
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+
+	var payload protocol.TaskCompletedPayload
+	if len(result) > 0 {
+		_ = json.Unmarshal(result, &payload)
+	}
+
+	s.syncIssueExecutionStageForTask(ctx, task, CompletedStageForMode(task.Mode))
+	if NormalizeTaskMode(task.Mode) == TaskModePlan {
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, buildTaskPlanComment(payload), "system", task.TriggerCommentID)
+	}
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
@@ -278,6 +314,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 	}
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
+	s.syncIssueExecutionStageForTask(ctx, task, FailedStageForMode(task.Mode))
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
@@ -376,6 +413,32 @@ func priorityToInt(p string) int32 {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func (s *TaskService) setIssueExecutionStage(ctx context.Context, issue db.Issue, stage string) (db.Issue, bool, error) {
+	stage = NormalizeExecutionStage(stage)
+	if NormalizeExecutionStage(issue.ExecutionStage) == stage {
+		return issue, false, nil
+	}
+	updated, err := s.Queries.UpdateIssueExecutionStage(ctx, db.UpdateIssueExecutionStageParams{
+		ID:             issue.ID,
+		ExecutionStage: stage,
+	})
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	s.broadcastIssueUpdated(updated)
+	return updated, true, nil
+}
+
+func (s *TaskService) syncIssueExecutionStageForTask(ctx context.Context, task db.AgentTaskQueue, stage string) {
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	if _, _, err := s.setIssueExecutionStage(ctx, issue, stage); err != nil {
+		slog.Warn("task stage sync failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "stage", stage, "error", err)
 	}
 }
 
@@ -524,6 +587,21 @@ func buildTaskDeliverySummaryComment(payload protocol.TaskCompletedPayload) stri
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+func buildTaskPlanComment(payload protocol.TaskCompletedPayload) string {
+	output := strings.TrimSpace(payload.Output)
+	summary := strings.TrimSpace(payload.Summary)
+	switch {
+	case output == "" && summary == "":
+		return ""
+	case output == "":
+		return summary
+	case summary != "" && !strings.Contains(output, summary):
+		return strings.TrimSpace(summary + "\n\n" + output)
+	default:
+		return output
+	}
+}
+
 func (s *TaskService) UpsertTaskDeliveryComment(ctx context.Context, task db.AgentTaskQueue, payload *protocol.TaskCompletedPayload) (string, error) {
 	if payload == nil {
 		return "", nil
@@ -625,6 +703,7 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		"position":        issue.Position,
 		"due_date":        util.TimestampToPtr(issue.DueDate),
+		"execution_stage": NormalizeExecutionStage(issue.ExecutionStage),
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
 	}

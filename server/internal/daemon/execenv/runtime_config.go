@@ -90,9 +90,37 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("### Workflow\n\n")
 
-	if ctx.TriggerCommentID != "" {
-		// Comment-triggered: focus on reading and replying
-		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")
+	mode := strings.TrimSpace(ctx.Mode)
+	if mode == "plan" {
+		b.WriteString("You are in native planning mode. Your job is to understand the issue deeply and produce a concrete implementation plan.\n\n")
+		b.WriteString("Hard constraints:\n")
+		b.WriteString("- Do NOT edit files\n")
+		b.WriteString("- Do NOT commit or push code\n")
+		b.WriteString("- Do NOT create or request a PR\n")
+		b.WriteString("- Do NOT change issue status just because planning is complete\n")
+		b.WriteString("- Do NOT mark the issue blocked unless you hit a real blocker that prevents planning\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue\n", ctx.IssueID)
+		if ctx.IdeaSlug != "" {
+			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", ctx.IdeaSlug)
+			fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the discussion\n", ctx.IssueID)
+		} else {
+			fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the discussion\n", ctx.IssueID)
+		}
+		b.WriteString("   - Use pagination when needed to focus on the latest instructions\n")
+		if ctx.TriggerCommentID != "" {
+			fmt.Fprintf(&b, "4. Pay special attention to the triggering comment (ID: `%s`) and incorporate that feedback into the revised plan\n", ctx.TriggerCommentID)
+		} else {
+			b.WriteString("4. Identify implementation scope, affected files/modules, sequencing, risks, and acceptance checks\n")
+		}
+		b.WriteString("5. If a repository is relevant, inspect its current structure only as needed to produce a grounded plan\n")
+		b.WriteString("6. Return a final response that is ready for human confirmation, including:\n")
+		b.WriteString("   - goal summary\n")
+		b.WriteString("   - implementation steps\n")
+		b.WriteString("   - risks or open questions\n")
+		b.WriteString("   - validation approach\n\n")
+	} else if ctx.TriggerCommentID != "" {
+		// Comment-triggered build-mode: focus on requested follow-up work and reply.
+		b.WriteString("**This build task was triggered by a comment.** Your primary job is to address the request and reply with the result.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
 		if ctx.IdeaSlug != "" {
 			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` to load the full idea context\n", ctx.IdeaSlug)
@@ -100,29 +128,25 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else {
 			fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
 		}
-		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
-		if ctx.IdeaSlug != "" {
-			fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
-			fmt.Fprintf(&b, "5. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-			b.WriteString("6. If the comment requests code changes or further work, do the work first, then reply with your results\n")
-			b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
-		} else {
-			fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked\n", ctx.TriggerCommentID)
-			fmt.Fprintf(&b, "4. Reply: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-			b.WriteString("5. If the comment requests code changes or further work, do the work first, then reply with your results\n")
-			b.WriteString("6. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
-		}
+		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` or `--since <timestamp>`\n")
+		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) and address what is being asked\n", ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "5. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+		b.WriteString("6. If code changes are needed, implement them, commit, and push the branch\n")
+		b.WriteString("7. The server handles PR creation after review; lack of immediate PR visibility is not a blocker\n")
+		fmt.Fprintf(&b, "8. When delivery artifacts are ready, run `multica issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "9. Reply in-thread only if useful for the human conversation: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "10. Only run `multica issue status %s blocked` for real implementation blockers\n\n", ctx.IssueID)
 	} else {
-		// Assignment-triggered: full workflow
-		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
+		// Assignment-triggered build-mode: full implementation workflow.
+		b.WriteString("You are in build mode. Implement the confirmed plan and manage the issue toward review.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 		if ctx.IdeaSlug != "" {
 			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", ctx.IdeaSlug)
 			fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-			b.WriteString("4. Read comments for additional context or human instructions\n")
+			b.WriteString("4. Read comments for any final human instructions before coding\n")
 		} else {
 			fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-			b.WriteString("3. Read comments for additional context or human instructions\n")
+			b.WriteString("3. Read comments for any final human instructions before coding\n")
 		}
 		b.WriteString("5. If the task requires code changes:\n")
 		if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {

@@ -19,6 +19,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     title: "Test",
     description: null,
     status: "todo",
+    execution_stage: "idle",
     priority: "medium",
     assignee_type: null,
     assignee_id: null,

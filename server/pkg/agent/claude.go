@@ -36,8 +36,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
-		"--permission-mode", "bypassPermissions",
 	}
+	permissionMode := "bypassPermissions"
+	if strings.TrimSpace(opts.Mode) == "plan" {
+		permissionMode = "plan"
+	}
+	args = append(args, "--permission-mode", permissionMode)
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -287,7 +291,7 @@ type claudeLogEntry struct {
 }
 
 type claudeMessageContent struct {
-	Role    string             `json:"role"`
+	Role    string               `json:"role"`
 	Content []claudeContentBlock `json:"content"`
 }
 

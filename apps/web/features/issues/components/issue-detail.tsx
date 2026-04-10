@@ -58,9 +58,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { ActorAvatar } from "@/components/common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
+import type { AgentTask, AgentTaskResult, UpdateIssueRequest, IssueStatus, IssuePriority, IssueExecutionStage, TimelineEntry } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { StatusIcon, PriorityIcon, DueDatePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
+import { IssueIdeaBadge } from "./issue-idea-badge";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
@@ -68,6 +69,7 @@ import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
+import { useWSEvent } from "@/features/realtime";
 import { useIssueTimeline } from "@/features/issues/hooks/use-issue-timeline";
 import { useIssueReactions } from "@/features/issues/hooks/use-issue-reactions";
 import { useIssueSubscribers } from "@/features/issues/hooks/use-issue-subscribers";
@@ -96,6 +98,28 @@ function repoLabel(repoUrl?: string | null): string {
   const trimmed = repoUrl.replace(/\/+$/, "");
   const parts = trimmed.split("/");
   return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : repoUrl;
+}
+
+function executionStageLabel(stage: IssueExecutionStage): string {
+  switch (stage) {
+    case "planning":
+      return "Planning";
+    case "plan_ready":
+      return "Plan Ready";
+    case "build_ready":
+      return "Build Ready";
+    case "building":
+      return "Building";
+    default:
+      return "Idle";
+  }
+}
+
+function getTaskResult(task: AgentTask | null): AgentTaskResult | null {
+  if (!task?.result || typeof task.result !== "object") {
+    return null;
+  }
+  return task.result as AgentTaskResult;
 }
 
 function formatActivity(
@@ -227,6 +251,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   // Single source of truth: read issue directly from global store
   const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? null;
   const [issueLoading, setIssueLoading] = useState(!issue);
+  const [taskRuns, setTaskRuns] = useState<AgentTask[]>([]);
+  const [confirmingPlan, setConfirmingPlan] = useState(false);
 
   // If issue isn't in the store yet, fetch and upsert it
   useEffect(() => {
@@ -246,6 +272,46 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       })
       .finally(() => setIssueLoading(false));
   }, [id, !!issue]);
+
+  const refreshTaskRuns = useCallback(() => {
+    api.listTasksByIssue(id).then(setTaskRuns).catch(console.error);
+  }, [id]);
+
+  useEffect(() => {
+    refreshTaskRuns();
+  }, [refreshTaskRuns]);
+
+  useWSEvent(
+    "task:completed",
+    useCallback((payload: unknown) => {
+      const data = payload as { issue_id: string };
+      if (data.issue_id === id) refreshTaskRuns();
+    }, [id, refreshTaskRuns]),
+  );
+
+  useWSEvent(
+    "task:updated",
+    useCallback((payload: unknown) => {
+      const data = payload as { issue_id: string };
+      if (data.issue_id === id) refreshTaskRuns();
+    }, [id, refreshTaskRuns]),
+  );
+
+  useWSEvent(
+    "task:failed",
+    useCallback((payload: unknown) => {
+      const data = payload as { issue_id: string };
+      if (data.issue_id === id) refreshTaskRuns();
+    }, [id, refreshTaskRuns]),
+  );
+
+  useWSEvent(
+    "task:cancelled",
+    useCallback((payload: unknown) => {
+      const data = payload as { issue_id: string };
+      if (data.issue_id === id) refreshTaskRuns();
+    }, [id, refreshTaskRuns]),
+  );
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
@@ -296,6 +362,25 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const scrollToBottom = useCallback(() => {
     scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
   }, []);
+
+  const latestPlanTask = taskRuns.find((task) => task.mode === "plan" && task.status === "completed") ?? null;
+  const latestPlanResult = getTaskResult(latestPlanTask);
+  const latestPlanBody = latestPlanResult?.output?.trim() || "";
+
+  const handleConfirmPlan = useCallback(async () => {
+    if (!issue || issue.execution_stage !== "plan_ready" || confirmingPlan) return;
+    setConfirmingPlan(true);
+    try {
+      const updated = await api.confirmIssuePlan(issue.id);
+      useIssueStore.getState().updateIssue(issue.id, updated);
+      refreshTaskRuns();
+      toast.success("Build run queued");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to confirm plan");
+    } finally {
+      setConfirmingPlan(false);
+    }
+  }, [confirmingPlan, issue, refreshTaskRuns]);
 
   // Issue field updates — write directly to the global store (single source of truth)
   const handleUpdateField = useCallback(
@@ -664,6 +749,52 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
             }}
           />
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <IssueIdeaBadge issue={issue} />
+            <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {executionStageLabel(issue.execution_stage)}
+            </span>
+          </div>
+
+          {issue.execution_stage === "planning" && (
+            <div className="mt-4 rounded-2xl border border-info/20 bg-info/5 p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-info">
+                Planning In Progress
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                The assigned coding agent is using plan mode to understand the issue and the full idea context before any build work starts.
+              </p>
+            </div>
+          )}
+
+          {issue.execution_stage === "plan_ready" && latestPlanResult && (
+            <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/5 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">
+                    Plan Ready
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    Review the proposed plan below. Once confirmed, the assigned agent will switch into build mode and start implementation.
+                  </p>
+                </div>
+                <Button onClick={handleConfirmPlan} disabled={confirmingPlan} className="shrink-0">
+                  {confirmingPlan ? "Queueing Build..." : "Confirm Plan"}
+                </Button>
+              </div>
+              {latestPlanResult.summary && (
+                <p className="mt-4 text-sm font-medium leading-6 text-foreground">
+                  {latestPlanResult.summary}
+                </p>
+              )}
+              {latestPlanBody && (
+                <div className="mt-4 rounded-xl border border-border/60 bg-background/80 px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
+                  {latestPlanBody}
+                </div>
+              )}
+            </div>
+          )}
 
           <ContentEditor
             ref={descEditorRef}

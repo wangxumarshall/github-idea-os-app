@@ -274,6 +274,12 @@ export class ApiClient {
     });
   }
 
+  async confirmIssuePlan(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/confirm-plan`, {
+      method: "POST",
+    });
+  }
+
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
   }

@@ -252,6 +252,72 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestConfirmPlanQueuesBuildTask(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(ctx, testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9001, NULL, $5, 'plan_ready'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Plan confirmation test", agentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ConfirmPlan(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ConfirmPlan: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if updated.ExecutionStage != service.ExecutionStageBuildReady {
+		t.Fatalf("expected execution_stage %q, got %q", service.ExecutionStageBuildReady, updated.ExecutionStage)
+	}
+
+	var mode string
+	if err := testPool.QueryRow(ctx, `
+		SELECT mode
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&mode); err != nil {
+		t.Fatalf("load queued task: %v", err)
+	}
+	if mode != service.TaskModeBuild {
+		t.Fatalf("expected queued task mode %q, got %q", service.TaskModeBuild, mode)
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	w := httptest.NewRecorder()
@@ -732,11 +798,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",

@@ -50,5 +50,12 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateIssueExecutionStage :one
+UPDATE issue SET
+    execution_stage = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;

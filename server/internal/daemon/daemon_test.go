@@ -24,6 +24,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	prompt := BuildPrompt(Task{
 		IssueID: issueID,
+		Mode:    "plan",
 		Agent: &AgentData{
 			Name: "Local Codex",
 			Skills: []SkillData{
@@ -36,6 +37,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		"multica issue get",
+		"planning-only",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
@@ -55,6 +57,7 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 
 	prompt := BuildPrompt(Task{
 		IssueID: "test-id",
+		Mode:    "build",
 		Agent:   &AgentData{Name: "Test"},
 	})
 
@@ -63,6 +66,20 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 		if strings.Contains(prompt, absent) {
 			t.Fatalf("prompt should NOT contain %q — agent fetches details via CLI", absent)
 		}
+	}
+}
+
+func TestBuildPromptIncludesExecutionMode(t *testing.T) {
+	t.Parallel()
+
+	planPrompt := BuildPrompt(Task{IssueID: "issue-1", Mode: "plan"})
+	if !strings.Contains(planPrompt, "execution mode is: plan") {
+		t.Fatalf("expected plan prompt to mention plan mode, got %q", planPrompt)
+	}
+
+	buildPrompt := BuildPrompt(Task{IssueID: "issue-2", Mode: "build"})
+	if !strings.Contains(buildPrompt, "execution mode is: build") {
+		t.Fatalf("expected build prompt to mention build mode, got %q", buildPrompt)
 	}
 }
 

@@ -6,6 +6,7 @@ import type { Issue } from "@/shared/types";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useIssueSelectionStore } from "@/features/issues/stores/selection-store";
 import { PriorityIcon } from "./priority-icon";
+import { IssueIdeaBadge } from "./issue-idea-badge";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -45,6 +46,7 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
         <span className="w-16 shrink-0 text-xs text-muted-foreground">
           {issue.identifier}
         </span>
+        <IssueIdeaBadge issue={issue} compact className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{issue.title}</span>
         {issue.due_date && (
           <span className="shrink-0 text-xs text-muted-foreground">

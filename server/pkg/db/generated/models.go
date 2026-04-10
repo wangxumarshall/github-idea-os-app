@@ -79,6 +79,7 @@ type AgentTaskQueue struct {
 	SessionID        pgtype.Text        `json:"session_id"`
 	WorkDir          pgtype.Text        `json:"work_dir"`
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	Mode             string             `json:"mode"`
 }
 
 type Attachment struct {
@@ -233,6 +234,7 @@ type Issue struct {
 	Number             int32              `json:"number"`
 	RepoUrl            pgtype.Text        `json:"repo_url"`
 	IdeaID             pgtype.UUID        `json:"idea_id"`
+	ExecutionStage     string             `json:"execution_stage"`
 }
 
 type IssueDependency struct {
@@ -247,6 +249,20 @@ type IssueLabel struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	Color       string      `json:"color"`
+}
+
+type IssuePrJob struct {
+	ID          pgtype.UUID        `json:"id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Status      string             `json:"status"`
+	Attempts    int32              `json:"attempts"`
+	Payload     []byte             `json:"payload"`
+	LastError   pgtype.Text        `json:"last_error"`
+	RunAfter    pgtype.Timestamptz `json:"run_after"`
+	LockedAt    pgtype.Timestamptz `json:"locked_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type IssueReaction struct {

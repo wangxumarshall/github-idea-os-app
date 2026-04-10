@@ -11,6 +11,7 @@ import { ActorAvatar } from "@/components/common/actor-avatar";
 import { api } from "@/shared/api";
 import { useIssueStore } from "@/features/issues/store";
 import { PriorityIcon } from "./priority-icon";
+import { IssueIdeaBadge } from "./issue-idea-badge";
 import { PriorityPicker, AssigneePicker, DueDatePicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@/features/issues/config";
 import type { CardProperties } from "@/features/issues/stores/view-store";
@@ -66,8 +67,10 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border bg-card p-3.5 shadow-[0_1px_2px_0_rgba(0,0,0,0.03)] transition-shadow group-hover:shadow-sm">
-      {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        <IssueIdeaBadge issue={issue} compact className="shrink-0" />
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">

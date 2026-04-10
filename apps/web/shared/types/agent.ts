@@ -45,6 +45,7 @@ export interface AgentTask {
   runtime_id: string;
   issue_id: string;
   status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  mode: "plan" | "build";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;

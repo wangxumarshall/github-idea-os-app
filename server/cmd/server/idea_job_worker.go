@@ -151,11 +151,19 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 		return nil
 	}
 
+	if _, err := queries.UpdateIssueExecutionStage(ctx, db.UpdateIssueExecutionStageParams{
+		ID:             issue.ID,
+		ExecutionStage: service.QueueStageForMode(service.PreferredTaskMode(issue)),
+	}); err != nil {
+		return err
+	}
+
 	_, err = queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:   issue.AssigneeID,
 		RuntimeID: agent.RuntimeID,
 		IssueID:   issue.ID,
 		Priority:  priorityToQueueValue(issue.Priority),
+		Mode:      service.PreferredTaskMode(issue),
 	})
 	return err
 }

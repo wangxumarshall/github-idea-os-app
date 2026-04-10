@@ -22,6 +22,7 @@ type Backend interface {
 type ExecOptions struct {
 	Cwd             string
 	Model           string
+	Mode            string
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration

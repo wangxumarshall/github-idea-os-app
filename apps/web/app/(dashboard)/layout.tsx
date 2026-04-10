@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { MulticaIcon } from "@/components/multica-icon";
 import { useNavigationStore } from "@/features/navigation";
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { AppSidebar } from "./_components/app-sidebar";
@@ -44,6 +44,19 @@ export default function DashboardLayout({
     <SidebarProvider className="h-svh">
       <AppSidebar />
       <SidebarInset className="overflow-hidden">
+        <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:hidden">
+          <div className="flex items-center gap-2 px-3 py-2">
+            <SidebarTrigger className="-ml-1" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Workspace
+              </div>
+              <div className="truncate text-sm font-medium">
+                {workspace?.name ?? "Loading"}
+              </div>
+            </div>
+          </div>
+        </div>
         {workspace ? (
           children
         ) : (

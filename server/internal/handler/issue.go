@@ -28,6 +28,7 @@ type IssueResponse struct {
 	Title              string                  `json:"title"`
 	Description        *string                 `json:"description"`
 	Status             string                  `json:"status"`
+	ExecutionStage     string                  `json:"execution_stage"`
 	Priority           string                  `json:"priority"`
 	AssigneeType       *string                 `json:"assignee_type"`
 	AssigneeID         *string                 `json:"assignee_id"`
@@ -80,24 +81,25 @@ func defaultAgentTriggers() []byte {
 func issueToResponse(i db.Issue, issuePrefix string, idea *service.IdeaRecord, rootIssue *db.Issue) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	resp := IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Description:   textToPtr(i.Description),
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		RepoURL:       textToPtr(i.RepoUrl),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Description:    textToPtr(i.Description),
+		Status:         i.Status,
+		ExecutionStage: service.NormalizeExecutionStage(i.ExecutionStage),
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		Position:       i.Position,
+		DueDate:        timestampToPtr(i.DueDate),
+		RepoURL:        textToPtr(i.RepoUrl),
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
 	}
 
 	if idea != nil {
@@ -669,6 +671,46 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ConfirmPlan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	if service.NormalizeExecutionStage(issue.ExecutionStage) != service.ExecutionStagePlanReady {
+		writeError(w, http.StatusConflict, "plan is not ready for confirmation")
+		return
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		writeError(w, http.StatusBadRequest, "issue must be assigned to an agent before confirming the plan")
+		return
+	}
+
+	hasActiveTask, err := h.Queries.HasActiveTaskForIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect current task state")
+		return
+	}
+	if hasActiveTask {
+		writeError(w, http.StatusConflict, "wait for the active run to finish before confirming the plan")
+		return
+	}
+
+	if _, err := h.TaskService.EnqueueTaskForIssueInMode(r.Context(), issue, service.TaskModeBuild); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start build run: "+err.Error())
+		return
+	}
+
+	updatedIssue, err := h.Queries.GetIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reload issue")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, h.issueResponse(r.Context(), updatedIssue, h.getIssuePrefix(r.Context(), updatedIssue.WorkspaceID)))
 }
 
 // canAssignAgent checks whether the requesting user is allowed to assign issues

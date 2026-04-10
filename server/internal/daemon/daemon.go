@@ -888,6 +888,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                 task.IssueID,
+		Mode:                    task.Mode,
 		TriggerCommentID:        task.TriggerCommentID,
 		AgentName:               agentName,
 		AgentInstructions:       instructions,
@@ -983,6 +984,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
 		Cwd:             env.WorkDir,
 		Model:           entry.Model,
+		Mode:            task.Mode,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 	})
@@ -1134,6 +1136,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		if result.Output == "" {
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
 		}
+		if strings.TrimSpace(task.Mode) == "plan" {
+			return TaskResult{
+				Status:    "completed",
+				Comment:   result.Output,
+				Summary:   summarizePlanOutput(result.Output),
+				SessionID: result.SessionID,
+				WorkDir:   env.WorkDir,
+			}, nil
+		}
 		branchName := detectGitBranch(env.WorkDir)
 		prURL := extractFirstURL(result.Output, githubPRPattern)
 		compareURL := extractFirstURL(result.Output, githubComparePattern)
@@ -1263,6 +1274,24 @@ func inferDeliveryMetadata(output, branchName, prURL, compareURL string) (delive
 	default:
 		return "completed", "", "Run completed."
 	}
+}
+
+func summarizePlanOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(strings.TrimLeft(line, "-#*0123456789. \t"))
+		if line != "" {
+			if len(line) > 160 {
+				return line[:160] + "..."
+			}
+			return line
+		}
+	}
+	return ""
 }
 
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.

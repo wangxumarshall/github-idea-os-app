@@ -33,6 +33,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
 	args := []string{"run", "--format", "json"}
+	if strings.TrimSpace(opts.Mode) == "plan" {
+		args = append(args, "--agent", "plan")
+	} else {
+		args = append(args, "--agent", "build")
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}

@@ -28,6 +28,7 @@ type Task struct {
 	RuntimeID               string     `json:"runtime_id"`
 	IssueID                 string     `json:"issue_id"`
 	WorkspaceID             string     `json:"workspace_id"`
+	Mode                    string     `json:"mode"`
 	Agent                   *AgentData `json:"agent,omitempty"`
 	Repos                   []RepoData `json:"repos,omitempty"`
 	SelectedRepoURL         string     `json:"selected_repo_url,omitempty"`

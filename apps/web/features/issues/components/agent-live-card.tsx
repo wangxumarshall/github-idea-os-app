@@ -50,6 +50,10 @@ function getTaskResult(task: AgentTask): AgentTaskResult | null {
   return task.result as AgentTaskResult;
 }
 
+function taskModeLabel(mode: AgentTask["mode"]): string {
+  return mode === "plan" ? "Planning" : "Build";
+}
+
 function deliveryTone(result: AgentTaskResult | null): { label: string; className: string } | null {
   if (!result?.delivery_state) return null;
   switch (result.delivery_state) {
@@ -302,6 +306,7 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
   const name = (activeTask.agent_id ? getActorName("agent", activeTask.agent_id) : agentName) ?? "Agent";
+  const modeLabel = taskModeLabel(activeTask.mode);
 
   return (
     <>
@@ -330,8 +335,11 @@ export function AgentLiveCard({ issueId, agentName, scrollContainerRef }: AgentL
           )}
           <div className="flex items-center gap-1.5 text-xs font-medium min-w-0">
             <Loader2 className={cn("h-3 w-3 animate-spin shrink-0", isStuck ? "text-brand" : "text-info")} />
-            <span className="truncate">{name} is working</span>
+            <span className="truncate">{name} is {activeTask.mode === "plan" ? "planning" : "building"}</span>
           </div>
+          <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {modeLabel}
+          </span>
           <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {!isStuck && toolCount > 0 && (
             <span className="text-xs text-muted-foreground shrink-0">
@@ -508,6 +516,9 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
         ) : (
           <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         )}
+        <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {taskModeLabel(task.mode)}
+        </span>
         <span className="text-muted-foreground">
           {new Date(task.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>

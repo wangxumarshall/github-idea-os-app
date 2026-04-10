@@ -12,7 +12,7 @@ import (
 )
 
 const listIssuesByIdeaID = `-- name: ListIssuesByIdeaID :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, repo_url, idea_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, repo_url, idea_id, execution_stage FROM issue
 WHERE idea_id = $1
 ORDER BY
   CASE WHEN parent_issue_id IS NULL THEN 0 ELSE 1 END,
@@ -50,6 +50,7 @@ func (q *Queries) ListIssuesByIdeaID(ctx context.Context, ideaID pgtype.UUID) ([
 			&i.Number,
 			&i.RepoUrl,
 			&i.IdeaID,
+			&i.ExecutionStage,
 		); err != nil {
 			return nil, err
 		}

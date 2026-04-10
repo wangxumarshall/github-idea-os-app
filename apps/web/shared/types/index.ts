@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssueExecutionStage, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
 export type { IdeaOSConfig, IdeaSummary, IdeaDocument, IdeaIssuesResponse, IdeaNameSuggestion, GitHubAccount } from "./idea";
 export type {
   Agent,
@@ -9,6 +9,7 @@ export type {
   AgentTool,
   AgentTrigger,
   AgentTask,
+  AgentTaskResult,
   AgentRuntime,
   RuntimeDevice,
   CreateAgentRequest,

@@ -7,6 +7,13 @@ export type IssueStatus =
   | "blocked"
   | "cancelled";
 
+export type IssueExecutionStage =
+  | "idle"
+  | "planning"
+  | "plan_ready"
+  | "build_ready"
+  | "building";
+
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
@@ -28,6 +35,7 @@ export interface Issue {
   title: string;
   description: string | null;
   status: IssueStatus;
+  execution_stage: IssueExecutionStage;
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;

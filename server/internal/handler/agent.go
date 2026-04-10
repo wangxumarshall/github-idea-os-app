@@ -99,6 +99,7 @@ type AgentTaskResponse struct {
 	IssueID                 string         `json:"issue_id"`
 	WorkspaceID             string         `json:"workspace_id"`
 	Status                  string         `json:"status"`
+	Mode                    string         `json:"mode"`
 	Priority                int32          `json:"priority"`
 	DispatchedAt            *string        `json:"dispatched_at"`
 	StartedAt               *string        `json:"started_at"`
@@ -138,6 +139,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),
 		Status:           t.Status,
+		Mode:             service.NormalizeTaskMode(t.Mode),
 		Priority:         t.Priority,
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),
 		StartedAt:        timestampToPtr(t.StartedAt),
