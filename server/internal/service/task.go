@@ -277,19 +277,34 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		_ = json.Unmarshal(result, &payload)
 	}
 
-	s.syncIssueExecutionStageForTask(ctx, task, CompletedStageForMode(task.Mode))
 	if NormalizeTaskMode(task.Mode) == TaskModePlan {
-		revision, revErr := s.nextPlanRevision(ctx, task.IssueID)
+		latestPlan := s.latestPlanArtifact(ctx, task.IssueID, task.ID)
+		revision, revErr := s.nextPlanRevision(ctx, task.IssueID, task.ID)
 		if revErr == nil {
 			payload.PlanRevision = revision
 		}
-		payload.PlanStatus = "ready"
+		if payload.PlanThreadRootID == "" && latestPlan != nil {
+			payload.PlanThreadRootID = strings.TrimSpace(latestPlan.PlanThreadRootID)
+		}
+		if payload.PlanStatus == "" {
+			payload.PlanStatus = "ready"
+		}
+		if len(payload.PlanQuestions) > 0 {
+			payload.PlanRequiresDecision = true
+		}
+		if payload.PlanRequiresDecision {
+			payload.PlanStatus = "draft"
+		}
+		if strings.TrimSpace(payload.PlanStatus) == "draft" {
+			payload.PlanRequiresDecision = true
+		}
 
-		commentID, commentErr := s.UpsertTaskPlanComment(ctx, task, &payload)
+		commentID, rootID, commentErr := s.CreateTaskPlanRevisionComment(ctx, task, &payload)
 		if commentErr != nil {
 			slog.Warn("upsert task plan comment failed", "task_id", util.UUIDToString(task.ID), "error", commentErr)
 		} else {
 			payload.PlanCommentID = commentID
+			payload.PlanThreadRootID = rootID
 		}
 
 		if resultBytes, marshalErr := json.Marshal(payload); marshalErr == nil {
@@ -300,6 +315,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 		}
 	}
+
+	s.syncIssueExecutionStageForTask(ctx, task, CompletedStageForMode(task.Mode))
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
@@ -450,29 +467,27 @@ func (s *TaskService) updateTaskResult(ctx context.Context, taskID pgtype.UUID, 
 	})
 }
 
-func (s *TaskService) nextPlanRevision(ctx context.Context, issueID pgtype.UUID) (int, error) {
-	tasks, err := s.Queries.ListTasksByIssue(ctx, issueID)
-	if err != nil {
-		return 0, err
+func (s *TaskService) nextPlanRevision(ctx context.Context, issueID pgtype.UUID, excludeTaskID pgtype.UUID) (int, error) {
+	latest := s.latestPlanArtifact(ctx, issueID, excludeTaskID)
+	if latest != nil && latest.PlanRevision > 0 {
+		return latest.PlanRevision + 1, nil
 	}
-	revision := 0
-	for _, task := range tasks {
-		if task.Status == "completed" && NormalizeTaskMode(task.Mode) == TaskModePlan {
-			revision++
-		}
-	}
-	if revision == 0 {
-		revision = 1
-	}
-	return revision, nil
+	return 1, nil
 }
 
-func (s *TaskService) latestPlanCommentID(ctx context.Context, issueID pgtype.UUID) string {
+func (s *TaskService) latestPlanArtifact(ctx context.Context, issueID pgtype.UUID, excludeTaskID ...pgtype.UUID) *protocol.TaskCompletedPayload {
 	tasks, err := s.Queries.ListTasksByIssue(ctx, issueID)
 	if err != nil {
-		return ""
+		return nil
+	}
+	excluded := ""
+	if len(excludeTaskID) > 0 {
+		excluded = util.UUIDToString(excludeTaskID[0])
 	}
 	for _, task := range tasks {
+		if excluded != "" && util.UUIDToString(task.ID) == excluded {
+			continue
+		}
 		if task.Status != "completed" || NormalizeTaskMode(task.Mode) != TaskModePlan || len(task.Result) == 0 {
 			continue
 		}
@@ -480,11 +495,9 @@ func (s *TaskService) latestPlanCommentID(ctx context.Context, issueID pgtype.UU
 		if err := json.Unmarshal(task.Result, &payload); err != nil {
 			continue
 		}
-		if commentID := strings.TrimSpace(payload.PlanCommentID); commentID != "" {
-			return commentID
-		}
+		return &payload
 	}
-	return ""
+	return nil
 }
 
 func (s *TaskService) setIssueExecutionStage(ctx context.Context, issue db.Issue, stage string) (db.Issue, bool, error) {
@@ -672,64 +685,50 @@ func buildTaskPlanComment(payload protocol.TaskCompletedPayload) string {
 	if summary != "" {
 		lines = append(lines, summary)
 	}
+	if payload.PlanRequiresDecision && len(payload.PlanQuestions) > 0 {
+		lines = append(lines, "Open Decisions:\n- "+strings.Join(payload.PlanQuestions, "\n- "))
+	}
 	if output != "" {
 		if summary == "" || !strings.Contains(output, summary) {
 			lines = append(lines, output)
 		}
 	}
-	lines = append(lines, "Reply in this thread with decisions or requested changes. Click Confirm Plan when the plan is final.")
+	if payload.PlanRequiresDecision {
+		lines = append(lines, "Reply in this thread with decisions or requested changes. Confirm Plan will stay disabled until the open decisions are resolved.")
+	} else {
+		lines = append(lines, "Reply in this thread with decisions or requested changes. Click Confirm Plan when the plan is final.")
+	}
 	return strings.TrimSpace(strings.Join(lines, "\n\n"))
 }
 
-func (s *TaskService) UpsertTaskPlanComment(ctx context.Context, task db.AgentTaskQueue, payload *protocol.TaskCompletedPayload) (string, error) {
+func (s *TaskService) CreateTaskPlanRevisionComment(ctx context.Context, task db.AgentTaskQueue, payload *protocol.TaskCompletedPayload) (string, string, error) {
 	if payload == nil {
-		return "", nil
+		return "", "", nil
 	}
 	content := buildTaskPlanComment(*payload)
 	if content == "" {
-		return "", nil
+		return "", "", nil
 	}
 
 	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 
-	commentID := strings.TrimSpace(payload.PlanCommentID)
-	if commentID == "" {
-		commentID = s.latestPlanCommentID(ctx, task.IssueID)
+	rootID := strings.TrimSpace(payload.PlanThreadRootID)
+	if rootID == "" {
+		if latest := s.latestPlanArtifact(ctx, task.IssueID); latest != nil {
+			rootID = strings.TrimSpace(latest.PlanThreadRootID)
+			if rootID == "" {
+				rootID = strings.TrimSpace(latest.PlanCommentID)
+			}
+		}
 	}
 
-	if commentID != "" {
-		comment, err := s.Queries.UpdateComment(ctx, db.UpdateCommentParams{
-			ID:      util.ParseUUID(commentID),
-			Content: content,
-		})
-		if err == nil {
-			s.Bus.Publish(events.Event{
-				Type:        protocol.EventCommentUpdated,
-				WorkspaceID: util.UUIDToString(issue.WorkspaceID),
-				ActorType:   "agent",
-				ActorID:     util.UUIDToString(task.AgentID),
-				Payload: map[string]any{
-					"comment": map[string]any{
-						"id":          util.UUIDToString(comment.ID),
-						"issue_id":    util.UUIDToString(comment.IssueID),
-						"author_type": comment.AuthorType,
-						"author_id":   util.UUIDToString(comment.AuthorID),
-						"content":     comment.Content,
-						"type":        comment.Type,
-						"parent_id":   util.UUIDToPtr(comment.ParentID),
-						"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
-						"updated_at":  comment.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
-						"reactions":   []any{},
-						"attachments": []any{},
-					},
-				},
-			})
-			return util.UUIDToString(comment.ID), nil
-		}
+	parentID := task.TriggerCommentID
+	if rootID != "" {
+		parentID = util.ParseUUID(rootID)
 	}
 
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
@@ -739,9 +738,13 @@ func (s *TaskService) UpsertTaskPlanComment(ctx context.Context, task db.AgentTa
 		AuthorID:    task.AgentID,
 		Content:     content,
 		Type:        "system",
+		ParentID:    parentID,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	if rootID == "" {
+		rootID = util.UUIDToString(comment.ID)
 	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
@@ -766,7 +769,7 @@ func (s *TaskService) UpsertTaskPlanComment(ctx context.Context, task db.AgentTa
 			"issue_status": issue.Status,
 		},
 	})
-	return util.UUIDToString(comment.ID), nil
+	return util.UUIDToString(comment.ID), rootID, nil
 }
 
 func (s *TaskService) UpsertTaskDeliveryComment(ctx context.Context, task db.AgentTaskQueue, payload *protocol.TaskCompletedPayload) (string, error) {

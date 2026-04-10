@@ -26,18 +26,21 @@ type TaskProgressPayload struct {
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
-	TaskID            string `json:"task_id"`
-	PRURL             string `json:"pr_url,omitempty"`
-	CompareURL        string `json:"compare_url,omitempty"`
-	BranchName        string `json:"branch_name,omitempty"`
-	Output            string `json:"output,omitempty"`
-	Summary           string `json:"summary,omitempty"`
-	DeliveryState     string `json:"delivery_state,omitempty"`
-	HandoffReason     string `json:"handoff_reason,omitempty"`
-	DeliveryCommentID string `json:"delivery_comment_id,omitempty"`
-	PlanCommentID     string `json:"plan_comment_id,omitempty"`
-	PlanRevision      int    `json:"plan_revision,omitempty"`
-	PlanStatus        string `json:"plan_status,omitempty"`
+	TaskID               string   `json:"task_id"`
+	PRURL                string   `json:"pr_url,omitempty"`
+	CompareURL           string   `json:"compare_url,omitempty"`
+	BranchName           string   `json:"branch_name,omitempty"`
+	Output               string   `json:"output,omitempty"`
+	Summary              string   `json:"summary,omitempty"`
+	DeliveryState        string   `json:"delivery_state,omitempty"`
+	HandoffReason        string   `json:"handoff_reason,omitempty"`
+	DeliveryCommentID    string   `json:"delivery_comment_id,omitempty"`
+	PlanCommentID        string   `json:"plan_comment_id,omitempty"`
+	PlanThreadRootID     string   `json:"plan_thread_root_comment_id,omitempty"`
+	PlanRevision         int      `json:"plan_revision,omitempty"`
+	PlanStatus           string   `json:"plan_status,omitempty"`
+	PlanRequiresDecision bool     `json:"plan_requires_decision,omitempty"`
+	PlanQuestions        []string `json:"plan_questions,omitempty"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)

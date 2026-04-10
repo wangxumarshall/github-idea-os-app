@@ -103,13 +103,16 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 
 func (c *Client) CompleteTask(ctx context.Context, taskID string, payload protocol.TaskCompletedPayload, sessionID, workDir string) error {
 	body := map[string]any{
-		"output":         payload.Output,
-		"summary":        payload.Summary,
-		"pr_url":         payload.PRURL,
-		"compare_url":    payload.CompareURL,
-		"branch_name":    payload.BranchName,
-		"delivery_state": payload.DeliveryState,
-		"handoff_reason": payload.HandoffReason,
+		"output":                 payload.Output,
+		"summary":                payload.Summary,
+		"pr_url":                 payload.PRURL,
+		"compare_url":            payload.CompareURL,
+		"branch_name":            payload.BranchName,
+		"delivery_state":         payload.DeliveryState,
+		"handoff_reason":         payload.HandoffReason,
+		"plan_status":            payload.PlanStatus,
+		"plan_requires_decision": payload.PlanRequiresDecision,
+		"plan_questions":         payload.PlanQuestions,
 	}
 	if sessionID != "" {
 		body["session_id"] = sessionID

@@ -21,6 +21,14 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-multica}"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
 echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
+if ! command -v docker > /dev/null 2>&1; then
+  echo "ERROR: docker is required to start the shared PostgreSQL container."
+  exit 1
+fi
+if ! docker compose version > /dev/null 2>&1; then
+  echo "ERROR: docker compose is required to start the shared PostgreSQL container."
+  exit 1
+fi
 docker compose up -d postgres
 
 echo "==> Waiting for PostgreSQL to be ready..."

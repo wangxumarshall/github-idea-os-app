@@ -368,9 +368,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const latestPlanResult = getTaskResult(latestPlanTask);
   const latestPlanBody = latestPlanResult?.output?.trim() || "";
   const latestPlanRevision = latestPlanResult?.plan_revision ?? completedPlanTasks.length;
+  const canConfirmPlan = issue?.execution_stage === "plan_ready" &&
+    !!latestPlanResult &&
+    latestPlanResult.plan_status === "ready" &&
+    !latestPlanResult.plan_requires_decision;
+  const latestPlanQuestions = latestPlanResult?.plan_questions ?? [];
 
   const handleConfirmPlan = useCallback(async () => {
-    if (!issue || issue.execution_stage !== "plan_ready" || confirmingPlan) return;
+    if (!issue || !canConfirmPlan || confirmingPlan) return;
     setConfirmingPlan(true);
     try {
       const updated = await api.confirmIssuePlan(issue.id);
@@ -382,7 +387,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     } finally {
       setConfirmingPlan(false);
     }
-  }, [confirmingPlan, issue, refreshTaskRuns]);
+  }, [canConfirmPlan, confirmingPlan, issue, refreshTaskRuns]);
 
   // Issue field updates — write directly to the global store (single source of truth)
   const handleUpdateField = useCallback(
@@ -800,14 +805,32 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     Review the proposed plan below. Reply in the issue thread with decisions or requested changes. Once confirmed, the assigned agent will switch into build mode and start implementation.
                   </p>
                 </div>
-                <Button onClick={handleConfirmPlan} disabled={confirmingPlan} className="shrink-0">
-                  {confirmingPlan ? "Queueing Build..." : "Confirm Plan"}
-                </Button>
+                {canConfirmPlan ? (
+                  <Button onClick={handleConfirmPlan} disabled={confirmingPlan} className="shrink-0">
+                    {confirmingPlan ? "Queueing Build..." : "Confirm Plan"}
+                  </Button>
+                ) : (
+                  <span className="shrink-0 rounded-full border border-warning/25 bg-background/80 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                    Awaiting decisions
+                  </span>
+                )}
               </div>
               {latestPlanResult.summary && (
                 <p className="mt-4 text-sm font-medium leading-6 text-foreground">
                   {latestPlanResult.summary}
                 </p>
+              )}
+              {latestPlanQuestions.length > 0 && (
+                <div className="mt-4 rounded-xl border border-warning/20 bg-background/80 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-warning">
+                    Open Decisions
+                  </div>
+                  <ul className="mt-2 list-disc pl-5 text-sm leading-6 text-foreground">
+                    {latestPlanQuestions.map((question) => (
+                      <li key={question}>{question}</li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {latestPlanBody && (
                 <div className="mt-4 rounded-xl border border-border/60 bg-background/80 px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">

@@ -83,6 +83,53 @@ func TestBuildPromptIncludesExecutionMode(t *testing.T) {
 	}
 }
 
+func TestAnalyzePlanOutputDraft(t *testing.T) {
+	t.Parallel()
+
+	status, requiresDecision, questions := analyzePlanOutput(`
+## Plan
+
+1. Update the issue detail UI.
+
+## Open Questions
+
+- Should we keep the badge compact?
+- Should mobile use a drawer?
+`)
+
+	if status != "draft" {
+		t.Fatalf("expected draft, got %q", status)
+	}
+	if !requiresDecision {
+		t.Fatal("expected requiresDecision=true")
+	}
+	if len(questions) != 2 {
+		t.Fatalf("expected 2 questions, got %#v", questions)
+	}
+}
+
+func TestAnalyzePlanOutputReady(t *testing.T) {
+	t.Parallel()
+
+	status, requiresDecision, questions := analyzePlanOutput(`
+## Final Plan
+
+1. Update the issue detail UI.
+2. Add backend gating.
+3. Verify with tests.
+`)
+
+	if status != "ready" {
+		t.Fatalf("expected ready, got %q", status)
+	}
+	if requiresDecision {
+		t.Fatal("expected requiresDecision=false")
+	}
+	if len(questions) != 0 {
+		t.Fatalf("expected no questions, got %#v", questions)
+	}
+}
+
 func TestIsWorkspaceNotFoundError(t *testing.T) {
 	t.Parallel()
 

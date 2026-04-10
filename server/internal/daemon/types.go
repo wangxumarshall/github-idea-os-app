@@ -64,15 +64,18 @@ type SkillFileData struct {
 
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status        string `json:"status"`
-	Comment       string `json:"comment"`
-	Summary       string `json:"summary,omitempty"`
-	PRURL         string `json:"pr_url,omitempty"`
-	CompareURL    string `json:"compare_url,omitempty"`
-	BranchName    string `json:"branch_name,omitempty"`
-	DeliveryState string `json:"delivery_state,omitempty"`
-	HandoffReason string `json:"handoff_reason,omitempty"`
-	EnvType       string `json:"env_type,omitempty"`
-	SessionID     string `json:"session_id,omitempty"` // Claude session ID for future resumption
-	WorkDir       string `json:"work_dir,omitempty"`   // working directory used during execution
+	Status               string   `json:"status"`
+	Comment              string   `json:"comment"`
+	Summary              string   `json:"summary,omitempty"`
+	PRURL                string   `json:"pr_url,omitempty"`
+	CompareURL           string   `json:"compare_url,omitempty"`
+	BranchName           string   `json:"branch_name,omitempty"`
+	DeliveryState        string   `json:"delivery_state,omitempty"`
+	HandoffReason        string   `json:"handoff_reason,omitempty"`
+	PlanStatus           string   `json:"plan_status,omitempty"`
+	PlanRequiresDecision bool     `json:"plan_requires_decision,omitempty"`
+	PlanQuestions        []string `json:"plan_questions,omitempty"`
+	EnvType              string   `json:"env_type,omitempty"`
+	SessionID            string   `json:"session_id,omitempty"` // Claude session ID for future resumption
+	WorkDir              string   `json:"work_dir,omitempty"`   // working directory used during execution
 }

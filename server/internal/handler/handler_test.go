@@ -171,6 +171,36 @@ func createTestAgentWithProvider(t *testing.T, provider string) string {
 	return agentID
 }
 
+func insertCompletedPlanTask(t *testing.T, issueID, agentID string, result map[string]any) {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT runtime_id
+		FROM agent
+		WHERE id = $1
+	`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, mode,
+			dispatched_at, started_at, completed_at, result
+		) VALUES (
+			$1, $2, $3, 'completed', 2, 'plan',
+			now(), now(), now(), $4
+		)
+	`, agentID, runtimeID, issueID, resultJSON); err != nil {
+		t.Fatalf("insert completed plan task: %v", err)
+	}
+}
+
 func newRequest(method, path string, body any) *http.Request {
 	var buf bytes.Buffer
 	if body != nil {
@@ -319,6 +349,12 @@ func TestConfirmPlanQueuesBuildTask(t *testing.T) {
 	`, testWorkspaceID, "Plan confirmation test", agentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
 		t.Fatalf("insert issue: %v", err)
 	}
+	insertCompletedPlanTask(t, issueID, agentID, map[string]any{
+		"output":                 "Final plan",
+		"summary":                "Ready to implement.",
+		"plan_status":            "ready",
+		"plan_requires_decision": false,
+	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
@@ -414,6 +450,12 @@ func TestConfirmPlanQueuesBuildForCodexAgent(t *testing.T) {
 	`, testWorkspaceID, "Codex confirm plan test", codexAgentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
 		t.Fatalf("insert issue: %v", err)
 	}
+	insertCompletedPlanTask(t, issueID, codexAgentID, map[string]any{
+		"output":                 "Codex final plan",
+		"summary":                "Ready to implement.",
+		"plan_status":            "ready",
+		"plan_requires_decision": false,
+	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
@@ -438,7 +480,7 @@ func TestConfirmPlanQueuesBuildForCodexAgent(t *testing.T) {
 	}
 }
 
-func TestPlanReadyCommentQueuesAnotherPlanRun(t *testing.T) {
+func TestPlanThreadReplyQueuesAnotherPlanRun(t *testing.T) {
 	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
 	if err != nil {
 		t.Fatalf("ensure legacy idea: %v", err)
@@ -471,9 +513,29 @@ func TestPlanReadyCommentQueuesAnotherPlanRun(t *testing.T) {
 		t.Fatalf("insert issue: %v", err)
 	}
 
+	var rootCommentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'Initial plan', 'system', NULL)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID).Scan(&rootCommentID); err != nil {
+		t.Fatalf("insert root plan comment: %v", err)
+	}
+	insertCompletedPlanTask(t, issueID, agentID, map[string]any{
+		"output":                      "Draft plan",
+		"summary":                     "Need a revision.",
+		"plan_status":                 "draft",
+		"plan_requires_decision":      true,
+		"plan_questions":              []string{"Should we update the sidebar copy?"},
+		"plan_comment_id":             rootCommentID,
+		"plan_thread_root_comment_id": rootCommentID,
+		"plan_revision":               1,
+	})
+
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
-		"content": "Please revise the plan and also loop in [@Other](mention://member/00000000-0000-0000-0000-000000000001).",
+		"content":   "Please revise the plan and also loop in [@Other](mention://member/00000000-0000-0000-0000-000000000001).",
+		"parent_id": rootCommentID,
 	})
 	req = withURLParam(req, "id", issueID)
 	testHandler.CreateComment(w, req)
@@ -493,6 +555,130 @@ func TestPlanReadyCommentQueuesAnotherPlanRun(t *testing.T) {
 	}
 	if mode != service.TaskModePlan {
 		t.Fatalf("expected plan task, got %q", mode)
+	}
+}
+
+func TestTopLevelCommentDoesNotQueuePlanRun(t *testing.T) {
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9004, NULL, $5, 'plan_ready'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Plan top-level comment issue", agentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	var rootCommentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'Initial plan', 'system', NULL)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID).Scan(&rootCommentID); err != nil {
+		t.Fatalf("insert root plan comment: %v", err)
+	}
+	insertCompletedPlanTask(t, issueID, agentID, map[string]any{
+		"output":                      "Draft plan",
+		"summary":                     "Need a revision.",
+		"plan_status":                 "draft",
+		"plan_requires_decision":      true,
+		"plan_questions":              []string{"Should we update the sidebar copy?"},
+		"plan_comment_id":             rootCommentID,
+		"plan_thread_root_comment_id": rootCommentID,
+		"plan_revision":               1,
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "Thanks, I will think about it.",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var taskCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1
+	`, issueID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("expected only the seeded completed plan task, got %d tasks", taskCount)
+	}
+}
+
+func TestConfirmPlanRejectsDraftPlan(t *testing.T) {
+	ctx := context.Background()
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(ctx, testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9005, NULL, $5, 'plan_ready'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Draft plan issue", agentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	insertCompletedPlanTask(t, issueID, agentID, map[string]any{
+		"output":                 "Draft plan",
+		"summary":                "Need a decision.",
+		"plan_status":            "draft",
+		"plan_requires_decision": true,
+		"plan_questions":         []string{"Should we change the sidebar layout?"},
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ConfirmPlan(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("ConfirmPlan: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

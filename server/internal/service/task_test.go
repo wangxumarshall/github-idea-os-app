@@ -55,6 +55,27 @@ func TestBuildTaskPlanCommentIncludesRevisionAndThreadPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPlanCommentShowsOpenDecisions(t *testing.T) {
+	comment := buildTaskPlanComment(protocol.TaskCompletedPayload{
+		Summary:              "Need your input.",
+		Output:               "Draft plan body.",
+		PlanRevision:         2,
+		PlanStatus:           "draft",
+		PlanRequiresDecision: true,
+		PlanQuestions:        []string{"Should we keep the badge compact?", "Should mobile open as sheet or drawer?"},
+	})
+
+	if !containsAll(comment,
+		"Plan revision 2",
+		"Need your input.",
+		"Open Decisions",
+		"Should we keep the badge compact?",
+		"Confirm Plan will stay disabled",
+	) {
+		t.Fatalf("unexpected draft plan comment:\n%s", comment)
+	}
+}
+
 func containsAll(text string, parts ...string) bool {
 	for _, part := range parts {
 		if part == "" {

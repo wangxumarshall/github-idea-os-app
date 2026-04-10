@@ -200,7 +200,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.threadID = threadID
 		b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 
-		selectedModel := extractThreadModel(threadResult)
+		selectedModel := strings.TrimSpace(opts.Model)
+		if selectedModel == "" {
+			selectedModel = extractThreadModel(threadResult)
+		}
 		selectedReasoningEffort := extractThreadReasoningEffort(threadResult)
 		collaborationMode, modeErr := buildCodexCollaborationMode(availableModes, opts.Mode, selectedModel, selectedReasoningEffort)
 		if modeErr != nil {
@@ -785,6 +788,9 @@ func buildCodexCollaborationMode(modes []codexCollaborationModeSummary, requeste
 
 	if requestedMode != "plan" {
 		return nil, fmt.Errorf("unsupported codex mode %q", requestedMode)
+	}
+	if len(modes) == 0 {
+		return nil, fmt.Errorf("codex app-server did not advertise any collaboration modes")
 	}
 	if model == "" {
 		return nil, fmt.Errorf("missing model for plan collaboration mode")

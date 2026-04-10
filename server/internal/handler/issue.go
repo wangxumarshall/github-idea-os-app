@@ -231,6 +231,24 @@ func (h *Handler) issueResponse(ctx context.Context, issue db.Issue, issuePrefix
 	return issueToResponse(issue, issuePrefix, idea, rootIssue)
 }
 
+func (h *Handler) latestPlanPayload(ctx context.Context, issueID pgtype.UUID) *protocol.TaskCompletedPayload {
+	tasks, err := h.Queries.ListTasksByIssue(ctx, issueID)
+	if err != nil {
+		return nil
+	}
+	for _, task := range tasks {
+		if task.Status != "completed" || service.NormalizeTaskMode(task.Mode) != service.TaskModePlan || len(task.Result) == 0 {
+			continue
+		}
+		var payload protocol.TaskCompletedPayload
+		if err := json.Unmarshal(task.Result, &payload); err != nil {
+			continue
+		}
+		return &payload
+	}
+	return nil
+}
+
 func (h *Handler) loadIdeaForCreate(ctx context.Context, workspaceID string, ideaID string) (*service.IdeaRecord, error) {
 	idea, err := h.IdeaStore.GetIdeaByID(ctx, h.DB, strings.TrimSpace(ideaID))
 	if err != nil {
@@ -697,6 +715,15 @@ func (h *Handler) ConfirmPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if hasActiveTask {
 		writeError(w, http.StatusConflict, "wait for the active run to finish before confirming the plan")
+		return
+	}
+	latestPlan := h.latestPlanPayload(r.Context(), issue.ID)
+	if latestPlan == nil {
+		writeError(w, http.StatusConflict, "no completed plan is available to confirm")
+		return
+	}
+	if strings.TrimSpace(latestPlan.PlanStatus) != "ready" || latestPlan.PlanRequiresDecision {
+		writeError(w, http.StatusConflict, "plan still has unresolved decisions")
 		return
 	}
 

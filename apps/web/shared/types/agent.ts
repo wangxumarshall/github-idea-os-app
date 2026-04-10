@@ -59,8 +59,11 @@ export interface AgentTaskResult {
   output?: string;
   summary?: string;
   plan_comment_id?: string;
+  plan_thread_root_comment_id?: string;
   plan_revision?: number;
   plan_status?: "draft" | "ready";
+  plan_requires_decision?: boolean;
+  plan_questions?: string[];
   pr_url?: string;
   compare_url?: string;
   branch_name?: string;

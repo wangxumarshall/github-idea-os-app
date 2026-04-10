@@ -851,14 +851,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	default:
 		taskLog.Info("task completed", "status", result.Status)
 		if err := d.client.CompleteTask(ctx, task.ID, protocol.TaskCompletedPayload{
-			TaskID:        task.ID,
-			Output:        result.Comment,
-			Summary:       result.Summary,
-			PRURL:         result.PRURL,
-			CompareURL:    result.CompareURL,
-			BranchName:    result.BranchName,
-			DeliveryState: result.DeliveryState,
-			HandoffReason: result.HandoffReason,
+			TaskID:               task.ID,
+			Output:               result.Comment,
+			Summary:              result.Summary,
+			PRURL:                result.PRURL,
+			CompareURL:           result.CompareURL,
+			BranchName:           result.BranchName,
+			DeliveryState:        result.DeliveryState,
+			HandoffReason:        result.HandoffReason,
+			PlanStatus:           result.PlanStatus,
+			PlanRequiresDecision: result.PlanRequiresDecision,
+			PlanQuestions:        result.PlanQuestions,
 		}, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error())); failErr != nil {
@@ -1137,12 +1140,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
 		}
 		if strings.TrimSpace(task.Mode) == "plan" {
+			planStatus, planRequiresDecision, planQuestions := analyzePlanOutput(result.Output)
 			return TaskResult{
-				Status:    "completed",
-				Comment:   result.Output,
-				Summary:   summarizePlanOutput(result.Output),
-				SessionID: result.SessionID,
-				WorkDir:   env.WorkDir,
+				Status:               "completed",
+				Comment:              result.Output,
+				Summary:              summarizePlanOutput(result.Output),
+				PlanStatus:           planStatus,
+				PlanRequiresDecision: planRequiresDecision,
+				PlanQuestions:        planQuestions,
+				SessionID:            result.SessionID,
+				WorkDir:              env.WorkDir,
 			}, nil
 		}
 		branchName := detectGitBranch(env.WorkDir)
@@ -1292,6 +1299,40 @@ func summarizePlanOutput(output string) string {
 		}
 	}
 	return ""
+}
+
+func analyzePlanOutput(output string) (status string, requiresDecision bool, questions []string) {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "draft", true, nil
+	}
+
+	lines := strings.Split(output, "\n")
+	inQuestionSection := false
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			if inQuestionSection {
+				inQuestionSection = false
+			}
+			continue
+		}
+
+		lower := strings.ToLower(strings.TrimSpace(strings.TrimLeft(line, "#-*0123456789. \t")))
+		if strings.Contains(lower, "open question") || strings.Contains(lower, "questions") || strings.Contains(lower, "decision") {
+			inQuestionSection = true
+			continue
+		}
+
+		if inQuestionSection || strings.HasSuffix(line, "?") || strings.Contains(lower, "please confirm") || strings.Contains(lower, "need your decision") || strings.Contains(lower, "choose one") {
+			questions = append(questions, strings.TrimSpace(strings.TrimLeft(line, "-*0123456789. \t")))
+		}
+	}
+
+	if len(questions) > 0 {
+		return "draft", true, questions
+	}
+	return "ready", false, nil
 }
 
 // repoDataToInfo converts daemon RepoData to repocache RepoInfo.

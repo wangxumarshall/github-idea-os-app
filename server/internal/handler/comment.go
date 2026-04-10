@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -257,9 +258,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	planInteraction := authorType == "member" &&
-		(service.NormalizeExecutionStage(issue.ExecutionStage) == service.ExecutionStagePlanning ||
-			service.NormalizeExecutionStage(issue.ExecutionStage) == service.ExecutionStagePlanReady)
+	planInteraction := authorType == "member" && h.commentTargetsActivePlanThread(r.Context(), issue, comment, parentComment)
 
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		(planInteraction ||
@@ -282,6 +281,42 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) commentTargetsActivePlanThread(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment) bool {
+	stage := service.NormalizeExecutionStage(issue.ExecutionStage)
+	if stage != service.ExecutionStagePlanning && stage != service.ExecutionStagePlanReady {
+		return false
+	}
+	if !comment.ParentID.Valid {
+		return false
+	}
+
+	latestPlan := h.latestPlanPayload(ctx, issue.ID)
+	if latestPlan == nil {
+		return false
+	}
+	rootID := strings.TrimSpace(latestPlan.PlanThreadRootID)
+	if rootID == "" {
+		rootID = strings.TrimSpace(latestPlan.PlanCommentID)
+	}
+	if rootID == "" {
+		return false
+	}
+
+	parentID := uuidToString(comment.ParentID)
+	if parentID == rootID {
+		return true
+	}
+	if parentComment != nil {
+		if uuidToString(parentComment.ID) == rootID {
+			return true
+		}
+		if parentComment.ParentID.Valid && uuidToString(parentComment.ParentID) == rootID {
+			return true
+		}
+	}
+	return false
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions

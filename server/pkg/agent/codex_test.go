@@ -456,6 +456,21 @@ func TestBuildCodexCollaborationModePlan(t *testing.T) {
 	}
 }
 
+func TestBuildCodexCollaborationModePlanUsesFallbackReasoning(t *testing.T) {
+	t.Parallel()
+
+	mode, err := buildCodexCollaborationMode([]codexCollaborationModeSummary{
+		{Mode: "plan"},
+	}, "plan", "gpt-5.4", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mode.(codexCollaborationMode)
+	if got.Settings.ReasoningEffort != "xhigh" {
+		t.Fatalf("expected fallback reasoning effort xhigh, got %q", got.Settings.ReasoningEffort)
+	}
+}
+
 func TestBuildCodexCollaborationModeDefaultFallsBackToNil(t *testing.T) {
 	t.Parallel()
 
