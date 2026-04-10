@@ -266,7 +266,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, replyTo); err != nil {
+		if err := h.enqueueIssueTaskWithWarning(r.Context(), issue, replyTo); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
@@ -447,7 +447,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if comment.ParentID.Valid {
 			replyTo = comment.ParentID
 		}
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, replyTo); err != nil {
+		if err := h.enqueueMentionTaskWithWarning(ctx, issue, agentUUID, replyTo); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}

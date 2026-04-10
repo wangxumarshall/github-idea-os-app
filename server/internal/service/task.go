@@ -59,6 +59,10 @@ func (s *TaskService) EnqueueTaskForIssueInMode(ctx context.Context, issue db.Is
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if err := ValidateRuntimeExecutionModeSupport(ctx, s.Queries, agent.RuntimeID, mode); err != nil {
+		slog.Warn("task enqueue blocked by runtime capability", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID), "mode", mode, "error", err)
+		return db.AgentTaskQueue{}, err
+	}
 
 	var commentID pgtype.UUID
 	if len(triggerCommentID) > 0 {
@@ -109,6 +113,10 @@ func (s *TaskService) EnqueueTaskForMentionInMode(ctx context.Context, issue db.
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if err := ValidateRuntimeExecutionModeSupport(ctx, s.Queries, agent.RuntimeID, mode); err != nil {
+		slog.Warn("mention task enqueue blocked by runtime capability", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "mode", mode, "error", err)
+		return db.AgentTaskQueue{}, err
 	}
 
 	if _, _, err := s.setIssueExecutionStage(ctx, issue, QueueStageForMode(mode)); err != nil {

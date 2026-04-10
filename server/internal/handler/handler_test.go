@@ -138,6 +138,39 @@ func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+func createTestAgentWithProvider(t *testing.T, provider string) string {
+	t.Helper()
+	displayName := provider
+	if displayName != "" {
+		displayName = strings.ToUpper(displayName[:1]) + displayName[1:]
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'local', $3, 'online', $4, '{}'::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Handler %s Runtime", provider), provider, fmt.Sprintf("%s runtime", provider)).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id, tools, triggers
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'workspace', 1, $4, '[]'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("%s Test Agent", displayName), runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	return agentID
+}
+
 func newRequest(method, path string, body any) *http.Request {
 	var buf bytes.Buffer
 	if body != nil {
@@ -315,6 +348,94 @@ func TestConfirmPlanQueuesBuildTask(t *testing.T) {
 	}
 	if mode != service.TaskModeBuild {
 		t.Fatalf("expected queued task mode %q, got %q", service.TaskModeBuild, mode)
+	}
+}
+
+func TestCreateIssueWarnsWhenCodexAutoExecutionIsPaused(t *testing.T) {
+	codexAgentID := createTestAgentWithProvider(t, "codex")
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Codex staged execution warning",
+		"status":        "todo",
+		"priority":      "medium",
+		"assignee_type": "agent",
+		"assignee_id":   codexAgentID,
+		"idea_id":       legacyIdea.ID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue response: %v", err)
+	}
+
+	var queued int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1
+	`, parseUUID(created.ID)).Scan(&queued); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("expected no queued tasks for Codex staged execution, got %d", queued)
+	}
+
+	var warning string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT content
+		FROM comment
+		WHERE issue_id = $1 AND author_type = 'agent' AND type = 'system'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, parseUUID(created.ID)).Scan(&warning); err != nil {
+		t.Fatalf("load warning comment: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(warning), "codex") {
+		t.Fatalf("expected Codex warning comment, got %q", warning)
+	}
+}
+
+func TestConfirmPlanRejectsCodexAgent(t *testing.T) {
+	codexAgentID := createTestAgentWithProvider(t, "codex")
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9002, NULL, $5, 'plan_ready'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Codex confirm plan test", codexAgentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ConfirmPlan(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("ConfirmPlan: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(w.Body.String()), "codex") {
+		t.Fatalf("expected Codex conflict message, got %s", w.Body.String())
 	}
 }
 

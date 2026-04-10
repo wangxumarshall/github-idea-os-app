@@ -785,7 +785,7 @@ func (h *Handler) CreateIdeaIssue(w http.ResponseWriter, r *http.Request) {
 	resp := h.ideaIssueResponse(r.Context(), issue)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid && h.shouldEnqueueAgentTask(r.Context(), issue) {
-		h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		_ = h.enqueueIssueTaskWithWarning(r.Context(), issue)
 	}
 
 	writeJSON(w, http.StatusCreated, resp)

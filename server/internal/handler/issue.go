@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -487,7 +488,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Only ready issues in todo are enqueued for agents.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			_ = h.enqueueIssueTaskWithWarning(r.Context(), issue)
 		}
 	}
 
@@ -666,7 +667,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			_ = h.enqueueIssueTaskWithWarning(r.Context(), issue)
 		}
 	}
 
@@ -699,7 +700,12 @@ func (h *Handler) ConfirmPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForIssueInMode(r.Context(), issue, service.TaskModeBuild); err != nil {
+	if err := h.enqueueIssueTaskInModeWithWarning(r.Context(), issue, service.TaskModeBuild); err != nil {
+		var unsupported *service.UnsupportedExecutionModeError
+		if errors.As(err, &unsupported) {
+			writeError(w, http.StatusConflict, unsupported.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to start build run: "+err.Error())
 		return
 	}
@@ -982,7 +988,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				_ = h.enqueueIssueTaskWithWarning(r.Context(), issue)
 			}
 		}
 

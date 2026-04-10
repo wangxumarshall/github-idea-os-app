@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -81,5 +84,48 @@ func FailedStageForMode(mode string) string {
 		return ExecutionStageIdle
 	default:
 		return ExecutionStageBuildReady
+	}
+}
+
+type UnsupportedExecutionModeError struct {
+	Provider string
+	Mode     string
+}
+
+func (e *UnsupportedExecutionModeError) Error() string {
+	provider := strings.TrimSpace(strings.ToLower(e.Provider))
+	mode := NormalizeTaskMode(e.Mode)
+	switch provider {
+	case "codex":
+		return fmt.Sprintf("Codex native %s mode is paused while the daemon still uses the app-server adapter", mode)
+	default:
+		return fmt.Sprintf("%s native %s mode is not supported", provider, mode)
+	}
+}
+
+func (e *UnsupportedExecutionModeError) UserMessage() string {
+	provider := strings.TrimSpace(strings.ToLower(e.Provider))
+	switch provider {
+	case "codex":
+		return "Auto-execution did not start. Codex staged execution is paused because the current daemon still uses the app-server adapter and does not expose native plan/build mode."
+	default:
+		return e.Error()
+	}
+}
+
+func ValidateRuntimeExecutionModeSupport(ctx context.Context, queries *db.Queries, runtimeID pgtype.UUID, mode string) error {
+	runtime, err := queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		return fmt.Errorf("load runtime: %w", err)
+	}
+
+	switch strings.TrimSpace(strings.ToLower(runtime.Provider)) {
+	case "codex":
+		return &UnsupportedExecutionModeError{
+			Provider: runtime.Provider,
+			Mode:     mode,
+		}
+	default:
+		return nil
 	}
 }

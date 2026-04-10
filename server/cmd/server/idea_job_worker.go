@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -142,6 +144,14 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
 		return nil
 	}
+	if err := service.ValidateRuntimeExecutionModeSupport(ctx, queries, agent.RuntimeID, service.PreferredTaskMode(issue)); err != nil {
+		var unsupported *service.UnsupportedExecutionModeError
+		if errors.As(err, &unsupported) {
+			createIdeaRootWarningComment(ctx, queries, issue, issue.AssigneeID, unsupported.UserMessage())
+			return nil
+		}
+		return err
+	}
 
 	existingTasks, err := queries.ListTasksByIssue(ctx, issue.ID)
 	if err != nil {
@@ -166,6 +176,41 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 		Mode:      service.PreferredTaskMode(issue),
 	})
 	return err
+}
+
+func createIdeaRootWarningComment(ctx context.Context, queries *db.Queries, issue db.Issue, agentID pgtype.UUID, content string) {
+	content = strings.TrimSpace(content)
+	if content == "" || !agentID.Valid {
+		return
+	}
+
+	existing, err := queries.ListCommentsPaginated(ctx, db.ListCommentsPaginatedParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       20,
+		Offset:      0,
+	})
+	if err == nil {
+		for _, comment := range existing {
+			if comment.AuthorType == "agent" &&
+				util.UUIDToString(comment.AuthorID) == util.UUIDToString(agentID) &&
+				comment.Type == "system" &&
+				strings.TrimSpace(comment.Content) == content {
+				return
+			}
+		}
+	}
+
+	if _, err := queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    agentID,
+		Content:     content,
+		Type:        "system",
+	}); err != nil {
+		slog.Warn("idea job worker: create root warning comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+	}
 }
 
 func syncIdeaProjectSpec(ctx context.Context, store *service.IdeaStore, gh *service.GitHubIdeaOSService, cfg service.IdeaOSConfig, pool db.DBTX, idea *service.IdeaRecord) error {
