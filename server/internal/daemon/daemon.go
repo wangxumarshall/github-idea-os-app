@@ -1255,23 +1255,11 @@ func buildGitHubCompareURL(repoURL, workDir, branchName string) string {
 }
 
 func inferDeliveryMetadata(output, branchName, prURL, compareURL string) (deliveryState, handoffReason, summary string) {
-	lower := strings.ToLower(output)
 	switch {
 	case strings.TrimSpace(prURL) != "":
 		return "delivered", "", "Delivery ready. PR created."
 	case strings.TrimSpace(compareURL) != "" || strings.TrimSpace(branchName) != "":
-		reason := ""
-		switch {
-		case strings.Contains(lower, "gh is not logged in"):
-			reason = "GitHub CLI is not logged in in the task environment."
-		case strings.Contains(lower, "token returns 401"), strings.Contains(lower, "returned 401"):
-			reason = "GitHub authentication failed in the task environment."
-		case strings.Contains(lower, "could not create the pr"), strings.Contains(lower, "failed to create the pr"):
-			reason = "PR creation is unavailable from the task environment."
-		case strings.Contains(lower, "pr creation"):
-			reason = "PR creation requires handoff."
-		}
-		return "handoff_required", reason, "Delivery ready, but PR creation requires handoff."
+		return "completed", "", "Delivery ready. Waiting for PR automation."
 	default:
 		return "completed", "", "Run completed."
 	}

@@ -138,7 +138,14 @@ function formatActivity(
     case "task_completed":
       if (details.delivery_state === "delivered") return "prepared delivery for review";
       if (details.delivery_state === "handoff_required") return "prepared review handoff";
+      if (details.delivery_state === "completed" && (details.compare_url || details.branch_name)) {
+        return "prepared delivery and is waiting for PR automation";
+      }
       return "completed the run";
+    case "delivery_ready":
+      return "prepared delivery for review";
+    case "delivery_handoff_required":
+      return "prepared review handoff";
     case "task_failed":
       return "run failed";
     default:

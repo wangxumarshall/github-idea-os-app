@@ -119,6 +119,16 @@ type GitHubRepository struct {
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
 	HTMLURL       string `json:"html_url"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+type GitHubPullRequest struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+	Title   string `json:"title"`
 }
 
 type githubContentItem struct {
@@ -737,6 +747,81 @@ func (s *GitHubIdeaOSService) CreateRepository(ctx context.Context, token, repoN
 	return resp, nil
 }
 
+func (s *GitHubIdeaOSService) GetRepository(ctx context.Context, token, repoURL string) (GitHubRepository, error) {
+	cfg := IdeaOSConfig{
+		RepoURL:     strings.TrimSpace(repoURL),
+		Branch:      DefaultIdeaOSBranch,
+		GitHubToken: strings.TrimSpace(token),
+	}
+	if err := validateIdeaOSConfig(cfg); err != nil {
+		return GitHubRepository{}, err
+	}
+
+	owner, repo, err := parseGitHubRepoURL(cfg.RepoURL)
+	if err != nil {
+		return GitHubRepository{}, err
+	}
+
+	var result GitHubRepository
+	if err := s.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/%s", strings.TrimRight(s.BaseURL, "/"), owner, repo), cfg.GitHubToken, nil, &result); err != nil {
+		return GitHubRepository{}, err
+	}
+	return result, nil
+}
+
+func (s *GitHubIdeaOSService) FindOpenPullRequestByHead(ctx context.Context, token, repoURL, headOwner, headBranch string) (*GitHubPullRequest, error) {
+	repoURL = strings.TrimSpace(repoURL)
+	headOwner = strings.TrimSpace(headOwner)
+	headBranch = strings.TrimSpace(headBranch)
+	if repoURL == "" || headOwner == "" || headBranch == "" {
+		return nil, nil
+	}
+
+	owner, repo, err := parseGitHubRepoURL(repoURL)
+	if err != nil {
+		return nil, err
+	}
+
+	query := url.Values{}
+	query.Set("state", "open")
+	query.Set("head", headOwner+":"+headBranch)
+
+	var pulls []GitHubPullRequest
+	if err := s.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/%s/pulls?%s", strings.TrimRight(s.BaseURL, "/"), owner, repo, query.Encode()), strings.TrimSpace(token), nil, &pulls); err != nil {
+		return nil, err
+	}
+	if len(pulls) == 0 {
+		return nil, nil
+	}
+	return &pulls[0], nil
+}
+
+func (s *GitHubIdeaOSService) CreatePullRequest(ctx context.Context, token, repoURL, headBranch, baseBranch, title, body string) (GitHubPullRequest, error) {
+	repoURL = strings.TrimSpace(repoURL)
+	headBranch = strings.TrimSpace(headBranch)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if repoURL == "" || headBranch == "" || baseBranch == "" {
+		return GitHubPullRequest{}, fmt.Errorf("repo URL, head branch, and base branch are required")
+	}
+
+	owner, repo, err := parseGitHubRepoURL(repoURL)
+	if err != nil {
+		return GitHubPullRequest{}, err
+	}
+
+	reqBody := map[string]any{
+		"title": strings.TrimSpace(title),
+		"head":  headBranch,
+		"base":  baseBranch,
+		"body":  strings.TrimSpace(body),
+	}
+	var pr GitHubPullRequest
+	if err := s.doJSON(ctx, http.MethodPost, fmt.Sprintf("%s/repos/%s/%s/pulls", strings.TrimRight(s.BaseURL, "/"), owner, repo), strings.TrimSpace(token), reqBody, &pr); err != nil {
+		return GitHubPullRequest{}, err
+	}
+	return pr, nil
+}
+
 func (s *GitHubIdeaOSService) RenameDefaultBranchToMain(ctx context.Context, token, owner, repo, currentBranch string) error {
 	currentBranch = strings.TrimSpace(currentBranch)
 	if currentBranch == "" || currentBranch == "main" {
@@ -823,6 +908,10 @@ func parseGitHubRepoURL(raw string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid GitHub repository URL")
 	}
 	return parts[0], parts[1], nil
+}
+
+func ParseGitHubRepoURL(raw string) (string, string, error) {
+	return parseGitHubRepoURL(raw)
 }
 
 func (s *GitHubIdeaOSService) contentsURL(cfg IdeaOSConfig, contentPath string) string {

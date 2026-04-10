@@ -62,6 +62,7 @@ export interface AgentTaskResult {
   branch_name?: string;
   delivery_state?: "delivered" | "handoff_required" | "completed";
   handoff_reason?: string;
+  delivery_comment_id?: string;
 }
 
 export interface Agent {

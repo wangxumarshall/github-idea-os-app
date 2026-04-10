@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -51,12 +52,14 @@ func main() {
 	registerListeners(bus, hub)
 
 	queries := db.New(pool)
+	taskService := service.NewTaskService(queries, hub, bus)
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
 	// so subscribers must be written first within the same synchronous event dispatch.
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerPullRequestListeners(bus, queries, service.NewIssuePRStore(), pool)
 
 	r := NewRouter(pool, hub, bus)
 
@@ -69,6 +72,7 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runIdeaJobWorker(sweepCtx, pool, queries)
+	go runIssuePRJobWorker(sweepCtx, pool, queries, bus, taskService)
 
 	// Graceful shutdown
 	go func() {

@@ -238,19 +238,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
-	// Post agent output as a comment, but only for assignment-triggered tasks.
-	// Comment-triggered tasks: the agent replies via CLI with --parent, so
-	// posting here would create a duplicate.
-	if !task.TriggerCommentID.Valid {
-		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil {
-			summary := buildTaskDeliverySummaryComment(payload)
-			if summary != "" {
-				s.createAgentComment(ctx, task.IssueID, task.AgentID, summary, "system", task.TriggerCommentID)
-			}
-		}
-	}
-
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -535,6 +522,90 @@ func buildTaskDeliverySummaryComment(payload protocol.TaskCompletedPayload) stri
 		lines = append(lines, "Handoff: "+reason)
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func (s *TaskService) UpsertTaskDeliveryComment(ctx context.Context, task db.AgentTaskQueue, payload *protocol.TaskCompletedPayload) (string, error) {
+	if payload == nil {
+		return "", nil
+	}
+	content := buildTaskDeliverySummaryComment(*payload)
+	if content == "" {
+		return "", nil
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return "", err
+	}
+	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
+
+	if commentID := strings.TrimSpace(payload.DeliveryCommentID); commentID != "" {
+		comment, err := s.Queries.UpdateComment(ctx, db.UpdateCommentParams{
+			ID:      util.ParseUUID(commentID),
+			Content: content,
+		})
+		if err == nil {
+			s.Bus.Publish(events.Event{
+				Type:        protocol.EventCommentUpdated,
+				WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+				ActorType:   "agent",
+				ActorID:     util.UUIDToString(task.AgentID),
+				Payload: map[string]any{
+					"comment": map[string]any{
+						"id":          util.UUIDToString(comment.ID),
+						"issue_id":    util.UUIDToString(comment.IssueID),
+						"author_type": comment.AuthorType,
+						"author_id":   util.UUIDToString(comment.AuthorID),
+						"content":     comment.Content,
+						"type":        comment.Type,
+						"parent_id":   util.UUIDToPtr(comment.ParentID),
+						"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+						"updated_at":  comment.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
+						"reactions":   []any{},
+						"attachments": []any{},
+					},
+				},
+			})
+			return util.UUIDToString(comment.ID), nil
+		}
+	}
+
+	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     task.IssueID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    task.AgentID,
+		Content:     content,
+		Type:        "system",
+		ParentID:    task.TriggerCommentID,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(task.AgentID),
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          util.UUIDToString(comment.ID),
+				"issue_id":    util.UUIDToString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   util.UUIDToString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"parent_id":   util.UUIDToPtr(comment.ParentID),
+				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"updated_at":  comment.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"reactions":   []any{},
+				"attachments": []any{},
+			},
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+		},
+	})
+	return util.UUIDToString(comment.ID), nil
 }
 
 func issueToMap(issue db.Issue, issuePrefix string) map[string]any {

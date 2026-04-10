@@ -139,12 +139,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("   b. Implement the changes and commit\n")
 		}
 		b.WriteString("   c. Push the branch to the remote\n")
-		b.WriteString("   d. Create a pull request when the environment supports it\n")
-		fmt.Fprintf(&b, "   e. If a PR is created, post the PR link as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
-		b.WriteString("   f. If code is pushed but PR creation is unavailable from this environment, post a compare link and a short handoff note instead\n")
+		b.WriteString("   d. Push a review-ready branch; the server will attempt PR creation automatically after the issue moves to review\n")
+		fmt.Fprintf(&b, "   e. If you already know the PR URL, post it as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
+		b.WriteString("   f. If no PR is visible yet, do not treat that alone as a blocker — the server-side PR automation may still be running\n")
 		b.WriteString("6. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
 		fmt.Fprintf(&b, "7. When delivery artifacts are ready, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "8. Only run `multica issue status %s blocked` for real implementation blockers that prevent delivery\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "8. Only run `multica issue status %s blocked` for real implementation blockers; lack of immediate PR creation is not by itself a blocker\n\n", ctx.IssueID)
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -189,7 +189,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Output\n\n")
 	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 	b.WriteString("Good: \"Delivery ready. PR: https://...\"\n")
-	b.WriteString("Good: \"Delivery ready, but PR creation requires handoff. Compare: https://...\"\n")
+	b.WriteString("Good: \"Delivery ready. Branch pushed; PR automation should pick this up. Compare: https://...\"\n")
 	b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
 
 	return b.String()

@@ -20,6 +20,7 @@ export type WSEventType =
   | "task:dispatch"
   | "task:progress"
   | "task:completed"
+  | "task:updated"
   | "task:failed"
   | "task:message"
   | "task:cancelled"
@@ -171,6 +172,14 @@ export interface TaskMessagePayload {
 }
 
 export interface TaskCompletedPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  status: string;
+  result?: import("./agent").AgentTaskResult;
+}
+
+export interface TaskUpdatedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;

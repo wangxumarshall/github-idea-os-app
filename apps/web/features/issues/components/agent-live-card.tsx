@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Bot, ChevronRight, ChevronUp, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square } from "lucide-react";
 import { api } from "@/shared/api";
 import { useWSEvent } from "@/features/realtime";
-import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@/shared/types/events";
+import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload, TaskUpdatedPayload } from "@/shared/types/events";
 import type { AgentTask, AgentTaskResult } from "@/shared/types/agent";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -57,6 +57,11 @@ function deliveryTone(result: AgentTaskResult | null): { label: string; classNam
       return { label: "Delivery ready", className: "text-success" };
     case "handoff_required":
       return { label: "Handoff required", className: "text-warning" };
+    case "completed":
+      if (result.compare_url || result.branch_name) {
+        return { label: "Waiting for PR automation", className: "text-info" };
+      }
+      return { label: "Run completed", className: "text-muted-foreground" };
     default:
       return { label: "Run completed", className: "text-muted-foreground" };
   }
@@ -435,6 +440,15 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
     "task:cancelled",
     useCallback((payload: unknown) => {
       const p = payload as TaskCancelledPayload;
+      if (p.issue_id !== issueId) return;
+      api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
+    }, [issueId]),
+  );
+
+  useWSEvent(
+    "task:updated",
+    useCallback((payload: unknown) => {
+      const p = payload as TaskUpdatedPayload;
       if (p.issue_id !== issueId) return;
       api.listTasksByIssue(issueId).then(setTasks).catch(console.error);
     }, [issueId]),

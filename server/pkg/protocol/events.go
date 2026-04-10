@@ -11,10 +11,10 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"
@@ -26,6 +26,7 @@ const (
 	EventTaskDispatch  = "task:dispatch"
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed"
+	EventTaskUpdated   = "task:updated"
 	EventTaskFailed    = "task:failed"
 	EventTaskMessage   = "task:message"
 	EventTaskCancelled = "task:cancelled"
