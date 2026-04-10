@@ -5,6 +5,7 @@ import type { IdeaDocument } from "@/shared/types";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ slug: "repo-brain" }),
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 vi.mock("next/link", () => ({
@@ -57,6 +58,7 @@ const mockGetIdea = vi.hoisted(() => vi.fn());
 const mockGetIdeaIssues = vi.hoisted(() => vi.fn());
 const mockUpdateIdea = vi.hoisted(() => vi.fn());
 const mockRetryIdeaRepo = vi.hoisted(() => vi.fn());
+const mockDeleteIdea = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 
@@ -66,6 +68,7 @@ vi.mock("@/shared/api", () => ({
     getIdeaIssues: (...args: any[]) => mockGetIdeaIssues(...args),
     updateIdea: (...args: any[]) => mockUpdateIdea(...args),
     retryIdeaRepo: (...args: any[]) => mockRetryIdeaRepo(...args),
+    deleteIdea: (...args: any[]) => mockDeleteIdea(...args),
   },
 }));
 
@@ -107,6 +110,7 @@ describe("Idea editor autosave", () => {
     mockGetIdeaIssues.mockReset();
     mockUpdateIdea.mockReset();
     mockRetryIdeaRepo.mockReset();
+    mockDeleteIdea.mockReset();
     mockToastError.mockReset();
     mockToastSuccess.mockReset();
     mockRetryIdeaRepo.mockResolvedValue({ message: "ok" });

@@ -21,7 +21,7 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
 
   return (
     <div
-      className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:bg-accent/50 ${
+      className={`group/row flex h-11 items-center gap-2 px-3 text-sm transition-colors hover:bg-accent/50 md:h-9 md:px-4 ${
         selected ? "bg-accent/30" : ""
       }`}
     >
@@ -47,7 +47,11 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
           {issue.identifier}
         </span>
         <IssueIdeaBadge issue={issue} compact className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{issue.title}</span>
+        <div className="min-w-0 flex-1 overflow-x-auto md:overflow-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className="block min-w-max whitespace-nowrap md:min-w-0 md:truncate">
+            {issue.title}
+          </span>
+        </div>
         {issue.due_date && (
           <span className="shrink-0 text-xs text-muted-foreground">
             {formatDate(issue.due_date)}

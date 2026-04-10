@@ -673,6 +673,64 @@ func (h *Handler) RetryIdeaRepoProvision(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "repository provisioning retried"})
 }
 
+func (h *Handler) DeleteIdea(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	record, err := h.IdeaStore.GetIdeaBySlug(r.Context(), h.DB, workspaceID, chi.URLParam(r, "slug"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "idea not found")
+		return
+	}
+	if service.IsLegacyIdea(record.Code, record.SlugFull) {
+		writeError(w, http.StatusBadRequest, "legacy ideas cannot be deleted")
+		return
+	}
+
+	issues, err := h.Queries.ListIssuesByIdeaID(r.Context(), parseUUID(record.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect idea issues")
+		return
+	}
+	if len(issues) > 0 || strings.TrimSpace(record.RootIssueID) != "" {
+		writeError(w, http.StatusConflict, "delete related issues before deleting this idea")
+		return
+	}
+
+	account, err := h.GitHubOAuth.GetAccountByID(r.Context(), h.DB, record.GitHubAccountID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load GitHub account")
+		return
+	}
+	token, err := h.GitHubOAuth.DecryptAccessToken(account)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load GitHub token")
+		return
+	}
+
+	workspace, ok, err := h.loadWorkspaceByID(r, workspaceID)
+	if err != nil || !ok {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	cfg := service.IdeaOSConfigFromSettings(workspace.Settings)
+	cfg.GitHubToken = token
+
+	if err := h.IdeaOS.DeleteMarkdownFile(r.Context(), cfg, record.IdeaPath, record.MarkdownSHA, fmt.Sprintf("delete idea: %s", record.SlugFull)); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.IdeaStore.DeleteIdea(r.Context(), h.DB, record.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete idea")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) ListIdeaIssues(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 

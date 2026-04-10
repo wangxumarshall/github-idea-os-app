@@ -241,6 +241,12 @@ export class ApiClient {
     });
   }
 
+  async deleteIdea(slug: string): Promise<void> {
+    await this.fetch(`/api/ideas/${slug}`, {
+      method: "DELETE",
+    });
+  }
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();

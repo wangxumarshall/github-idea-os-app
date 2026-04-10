@@ -177,3 +177,119 @@ func TestCreateIdeaAssignsConfiguredDefaultAgentToRootIssue(t *testing.T) {
 		t.Fatalf("expected root issue assignee_id=%q, got %#v", agentID, issue.AssigneeID)
 	}
 }
+
+func TestDeleteIdeaDeletesEmptyIdea(t *testing.T) {
+	accountID := ensureTestGitHubAccount(t, "test-owner-delete")
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE workspace
+		SET settings = jsonb_build_object(
+			'ideaos', jsonb_build_object(
+				'repo_url', 'https://github.com/test-owner-delete/ideas',
+				'branch', 'main',
+				'directory', 'ideas',
+				'repo_visibility', 'private',
+				'default_agent_ids', '[]'::jsonb
+			)
+		)
+		WHERE id = $1
+	`, testWorkspaceID); err != nil {
+		t.Fatalf("update workspace settings: %v", err)
+	}
+
+	record, err := testHandler.IdeaStore.InsertIdea(context.Background(), testPool, service.IdeaRecord{
+		WorkspaceID:       testWorkspaceID,
+		OwnerUserID:       testUserID,
+		GitHubAccountID:   accountID,
+		SeqNo:             9991,
+		Code:              "idea9991",
+		SlugSuffix:        "delete-empty",
+		SlugFull:          "idea9991-delete-empty",
+		Title:             "Delete Empty Idea",
+		Summary:           "Temp idea",
+		Tags:              []string{"tmp"},
+		IdeaPath:          "ideas/idea9991-delete-empty.md",
+		MarkdownSHA:       "sha-delete-me",
+		ProjectRepoName:   "idea9991-delete-empty",
+		ProjectRepoURL:    "https://github.com/test-owner-delete/idea9991-delete-empty",
+		ProjectRepoStatus: "creating",
+	})
+	if err != nil {
+		t.Fatalf("insert idea: %v", err)
+	}
+
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || !strings.Contains(r.URL.Path, "/contents/ideas/idea9991-delete-empty.md") {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer github.Close()
+
+	prevBaseURL := testHandler.IdeaOS.BaseURL
+	prevClient := testHandler.IdeaOS.HTTPClient
+	testHandler.IdeaOS.BaseURL = github.URL
+	testHandler.IdeaOS.HTTPClient = github.Client()
+	defer func() {
+		testHandler.IdeaOS.BaseURL = prevBaseURL
+		testHandler.IdeaOS.HTTPClient = prevClient
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodDelete, "/api/ideas/"+record.SlugFull, nil)
+	req = withURLParam(req, "slug", record.SlugFull)
+	testHandler.DeleteIdea(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteIdea: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testHandler.IdeaStore.GetIdeaByID(context.Background(), testPool, record.ID); err == nil {
+		t.Fatal("expected idea to be deleted")
+	}
+}
+
+func TestDeleteIdeaRejectsNonEmptyIdea(t *testing.T) {
+	accountID := ensureTestGitHubAccount(t, "test-owner-delete-issue")
+	record, err := testHandler.IdeaStore.InsertIdea(context.Background(), testPool, service.IdeaRecord{
+		WorkspaceID:       testWorkspaceID,
+		OwnerUserID:       testUserID,
+		GitHubAccountID:   accountID,
+		SeqNo:             9992,
+		Code:              "idea9992",
+		SlugSuffix:        "delete-non-empty",
+		SlugFull:          "idea9992-delete-non-empty",
+		Title:             "Delete Non Empty Idea",
+		Summary:           "Temp idea",
+		IdeaPath:          "ideas/idea9992-delete-non-empty.md",
+		MarkdownSHA:       "sha-delete-non-empty",
+		ProjectRepoName:   "idea9992-delete-non-empty",
+		ProjectRepoURL:    "https://github.com/test-owner-delete/idea9992-delete-non-empty",
+		ProjectRepoStatus: "creating",
+	})
+	if err != nil {
+		t.Fatalf("insert idea: %v", err)
+	}
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			NULL, NULL, 'member', $3,
+			NULL, 0, NULL, 9992, NULL, $4, 'idle'
+		)
+	`, testWorkspaceID, "Idea child issue", testUserID, record.ID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodDelete, "/api/ideas/"+record.SlugFull, nil)
+	req = withURLParam(req, "slug", record.SlugFull)
+	testHandler.DeleteIdea(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("DeleteIdea: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}

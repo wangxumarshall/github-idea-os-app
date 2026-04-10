@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, Bug, FolderGit2, History, Plus, RotateCcw, Save, Shield, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bug, FolderGit2, History, Plus, RotateCcw, Save, Shield, Sparkles, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ContentEditor } from "@/features/editor";
 import { useIssueStore } from "@/features/issues";
 import { useModalStore } from "@/features/modals";
@@ -50,6 +60,7 @@ function IdeaIssueLink({ issue }: { issue: Issue }) {
 
 export function IdeaEditorPage() {
   const params = useParams<{ slug: string }>();
+  const router = useRouter();
   const slug = params.slug;
   const [idea, setIdea] = useState<IdeaDocument | null>(null);
   const [draft, setDraft] = useState("");
@@ -58,6 +69,8 @@ export function IdeaEditorPage() {
   const [saveClock, setSaveClock] = useState(Date.now());
   const [lastSavedAtMs, setLastSavedAtMs] = useState<number | null>(null);
   const [retryingRepo, setRetryingRepo] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const issues = useIssueStore((s) => s.issues);
 
   const draftRef = useRef(draft);
@@ -208,6 +221,8 @@ export function IdeaEditorPage() {
       .sort(compareIssueDates);
   }, [idea, issues]);
 
+  const canDeleteIdea = !rootIssue && childIssues.length === 0;
+
   const handleRetryRepo = async () => {
     if (!idea || retryingRepo) return;
     setRetryingRepo(true);
@@ -236,6 +251,20 @@ export function IdeaEditorPage() {
     });
   };
 
+  const handleDeleteIdea = async () => {
+    if (!idea || deleting) return;
+    setDeleting(true);
+    try {
+      await api.deleteIdea(idea.slug);
+      toast.success("Idea deleted");
+      router.push("/ideas");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete idea");
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  };
+
   if (loading || !idea) {
     return (
       <div className="space-y-4 px-6 py-6">
@@ -247,7 +276,7 @@ export function IdeaEditorPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.03),transparent_18%)]">
-      <div className="border-b border-border/60 px-6 py-4">
+      <div className="border-b border-border/60 px-4 py-4 md:px-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="space-y-3">
             <Link href="/ideas" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2 w-fit")}>
@@ -282,11 +311,22 @@ export function IdeaEditorPage() {
               <FolderGit2 className="h-3.5 w-3.5" />
               Repo {idea.project_repo_status}
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+              disabled={!canDeleteIdea}
+              title={canDeleteIdea ? "Delete idea" : "Delete related issues before deleting this idea"}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete Idea
+            </Button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
         <div className="mx-auto flex max-w-5xl flex-col gap-4">
           <Card className="border-border/70 bg-background/85">
             <CardHeader className="gap-3 border-b border-border/60">
@@ -319,7 +359,7 @@ export function IdeaEditorPage() {
                 <ContentEditor
                   key={idea.slug}
                   defaultValue={idea.content}
-                  className="min-h-[520px]"
+                  className="min-h-[420px] md:min-h-[520px]"
                   debounceMs={200}
                   onUpdate={(markdown) => setDraft(markdown)}
                   placeholder="Write the idea here..."
@@ -416,6 +456,29 @@ export function IdeaEditorPage() {
           </Card>
         </div>
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete idea</AlertDialogTitle>
+            <AlertDialogDescription>
+              {canDeleteIdea
+                ? `Delete ${idea.title}? This removes the idea record and its markdown source from the Ideas repository.`
+                : "Delete related issues before deleting this idea."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteIdea}
+              disabled={!canDeleteIdea || deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -264,6 +264,14 @@ func (s *IdeaStore) GetIdeaByID(ctx context.Context, dbtx db.DBTX, ideaID string
 	return &record, nil
 }
 
+func (s *IdeaStore) DeleteIdea(ctx context.Context, dbtx db.DBTX, ideaID string) error {
+	_, err := dbtx.Exec(ctx, `
+		DELETE FROM idea
+		WHERE id = $1
+	`, ideaID)
+	return err
+}
+
 func (s *IdeaStore) EnqueueRepoProvisionJob(ctx context.Context, dbtx db.DBTX, ideaID string) error {
 	_, err := dbtx.Exec(ctx, `
 		INSERT INTO idea_job (idea_id, job_type, status, payload)

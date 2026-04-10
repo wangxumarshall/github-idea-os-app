@@ -51,7 +51,7 @@ export function ListView({
   );
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-2">
+    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-1 md:p-2">
       <Accordion.Root
         multiple
         className="space-y-1"
@@ -76,7 +76,7 @@ export function ListView({
 
           return (
             <Accordion.Item key={status} value={status}>
-              <Accordion.Header className="group/header flex h-10 items-center rounded-lg bg-muted/40 transition-colors hover:bg-accent/30">
+              <Accordion.Header className="group/header flex h-11 items-center rounded-lg bg-muted/40 transition-colors hover:bg-accent/30 md:h-10">
                 <div className="pl-3 flex items-center">
                   <input
                     type="checkbox"

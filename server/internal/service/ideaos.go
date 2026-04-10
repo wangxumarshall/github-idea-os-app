@@ -153,6 +153,12 @@ type githubPutContentRequest struct {
 	SHA     string `json:"sha,omitempty"`
 }
 
+type githubDeleteContentRequest struct {
+	Message string `json:"message"`
+	Branch  string `json:"branch,omitempty"`
+	SHA     string `json:"sha"`
+}
+
 type githubPutContentResponse struct {
 	Content githubFileContent `json:"content"`
 }
@@ -680,6 +686,33 @@ func (s *GitHubIdeaOSService) PutMarkdownFile(ctx context.Context, cfg IdeaOSCon
 		return "", err
 	}
 	return resp.Content.SHA, nil
+}
+
+func (s *GitHubIdeaOSService) DeleteMarkdownFile(ctx context.Context, cfg IdeaOSConfig, filePath, sha, message string) error {
+	currentSHA := strings.TrimSpace(sha)
+	if currentSHA == "" {
+		_, latestSHA, err := s.GetMarkdownFile(ctx, cfg, filePath)
+		if err != nil {
+			if isGitHubNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		currentSHA = latestSHA
+	}
+
+	reqBody := githubDeleteContentRequest{
+		Message: message,
+		Branch:  normalizeIdeaOSBranch(cfg.Branch),
+		SHA:     currentSHA,
+	}
+	if err := s.doJSON(ctx, http.MethodDelete, s.contentsURL(cfg, filePath), cfg.GitHubToken, reqBody, nil); err != nil {
+		if isGitHubNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *GitHubIdeaOSService) SyncProjectRepoSpec(ctx context.Context, token, repoURL, markdown, sha, message string) (string, error) {
