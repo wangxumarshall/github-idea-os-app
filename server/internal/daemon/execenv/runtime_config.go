@@ -108,7 +108,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 		b.WriteString("   - Use pagination when needed to focus on the latest instructions\n")
 		if ctx.TriggerCommentID != "" {
-			fmt.Fprintf(&b, "4. Pay special attention to the triggering comment (ID: `%s`) and incorporate that feedback into the revised plan\n", ctx.TriggerCommentID)
+			fmt.Fprintf(&b, "4. Pay special attention to the triggering comment (ID: `%s`) and treat it as feedback on the previous draft plan\n", ctx.TriggerCommentID)
+			b.WriteString("   - Revise the plan instead of switching into implementation\n")
 		} else {
 			b.WriteString("4. Identify implementation scope, affected files/modules, sequencing, risks, and acceptance checks\n")
 		}
@@ -118,6 +119,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("   - implementation steps\n")
 		b.WriteString("   - risks or open questions\n")
 		b.WriteString("   - validation approach\n\n")
+		b.WriteString("End with explicit prompts for any decisions that still need user confirmation.\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered build-mode: focus on requested follow-up work and reply.
 		b.WriteString("**This build task was triggered by a comment.** Your primary job is to address the request and reply with the result.\n\n")

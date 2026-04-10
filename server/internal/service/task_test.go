@@ -33,6 +33,28 @@ func TestBuildTaskDeliverySummaryCommentUsesStructuredMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPlanCommentIncludesRevisionAndThreadPrompt(t *testing.T) {
+	comment := buildTaskPlanComment(protocol.TaskCompletedPayload{
+		Summary:      "Finalized implementation approach.",
+		Output:       "1. Update the issue detail card.\n2. Add confirm-plan dispatch.\n3. Verify with tests.",
+		PlanRevision: 3,
+		PlanStatus:   "ready",
+	})
+
+	if comment == "" {
+		t.Fatal("expected plan comment")
+	}
+	if !containsAll(comment,
+		"Plan revision 3",
+		"Finalized implementation approach.",
+		"1. Update the issue detail card.",
+		"Reply in this thread",
+		"Confirm Plan",
+	) {
+		t.Fatalf("unexpected plan comment:\n%s", comment)
+	}
+}
+
 func containsAll(text string, parts ...string) bool {
 	for _, part := range parts {
 		if part == "" {

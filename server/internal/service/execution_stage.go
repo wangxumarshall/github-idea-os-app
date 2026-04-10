@@ -119,13 +119,7 @@ func ValidateRuntimeExecutionModeSupport(ctx context.Context, queries *db.Querie
 		return fmt.Errorf("load runtime: %w", err)
 	}
 
-	switch strings.TrimSpace(strings.ToLower(runtime.Provider)) {
-	case "codex":
-		return &UnsupportedExecutionModeError{
-			Provider: runtime.Provider,
-			Mode:     mode,
-		}
-	default:
-		return nil
-	}
+	_ = mode
+	_ = runtime
+	return nil
 }

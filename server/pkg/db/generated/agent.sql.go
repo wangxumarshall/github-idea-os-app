@@ -1017,3 +1017,19 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 	)
 	return i, err
 }
+
+const updateAgentTaskResult = `-- name: UpdateAgentTaskResult :exec
+UPDATE agent_task_queue
+SET result = $2
+WHERE id = $1
+`
+
+type UpdateAgentTaskResultParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Result []byte      `json:"result"`
+}
+
+func (q *Queries) UpdateAgentTaskResult(ctx context.Context, arg UpdateAgentTaskResultParams) error {
+	_, err := q.db.Exec(ctx, updateAgentTaskResult, arg.ID, arg.Result)
+	return err
+}

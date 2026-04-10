@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -256,9 +257,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
+	planInteraction := authorType == "member" &&
+		(service.NormalizeExecutionStage(issue.ExecutionStage) == service.ExecutionStagePlanning ||
+			service.NormalizeExecutionStage(issue.ExecutionStage) == service.ExecutionStagePlanReady)
+
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
-		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(parentComment, comment.Content, issue) {
+		(planInteraction ||
+			(!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
+				!h.isReplyToMemberThread(parentComment, comment.Content, issue))) {
 		// Resolve thread root: if the comment is a reply, agent should reply
 		// to the thread root (matching frontend behavior where all replies
 		// in a thread share the same top-level parent).

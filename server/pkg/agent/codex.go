@@ -17,6 +17,27 @@ type codexBackend struct {
 	cfg Config
 }
 
+type codexCollaborationModeList struct {
+	Data []codexCollaborationModeSummary `json:"data"`
+}
+
+type codexCollaborationModeSummary struct {
+	Name            string  `json:"name"`
+	Mode            string  `json:"mode"`
+	Model           *string `json:"model"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+}
+
+type codexCollaborationMode struct {
+	Mode     string                        `json:"mode"`
+	Settings codexCollaborationModeSetting `json:"settings"`
+}
+
+type codexCollaborationModeSetting struct {
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -140,6 +161,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 		c.notify("initialized")
 
+		modesResult, err := c.request(runCtx, "collaborationMode/list", map[string]any{})
+		if err != nil {
+			b.cfg.Logger.Warn("codex collaborationMode/list failed", "error", err)
+		}
+		availableModes := extractCollaborationModes(modesResult)
+
 		// 2. Start thread
 		threadResult, err := c.request(runCtx, "thread/start", map[string]any{
 			"model":                  nilIfEmpty(opts.Model),
@@ -173,13 +200,27 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.threadID = threadID
 		b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 
+		selectedModel := extractThreadModel(threadResult)
+		selectedReasoningEffort := extractThreadReasoningEffort(threadResult)
+		collaborationMode, modeErr := buildCodexCollaborationMode(availableModes, opts.Mode, selectedModel, selectedReasoningEffort)
+		if modeErr != nil {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("codex collaboration mode failed: %v", modeErr)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
+
 		// 3. Send turn and wait for completion
-		_, err = c.request(runCtx, "turn/start", map[string]any{
+		turnParams := map[string]any{
 			"threadId": threadID,
 			"input": []map[string]any{
 				{"type": "text", "text": prompt},
 			},
-		})
+		}
+		if collaborationMode != nil {
+			turnParams["collaborationMode"] = collaborationMode
+		}
+		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("codex turn/start failed: %v", err)
@@ -247,6 +288,7 @@ type codexClient struct {
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
 	completedTurnIDs     map[string]bool
+	streamedMessageIDs   map[string]bool
 }
 
 type pendingRPC struct {
@@ -555,6 +597,21 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 }
 
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {
+	if method == "item/agentMessage/delta" {
+		itemID := extractString(params, "itemId")
+		delta := extractString(params, "delta")
+		if itemID != "" {
+			if c.streamedMessageIDs == nil {
+				c.streamedMessageIDs = map[string]bool{}
+			}
+			c.streamedMessageIDs[itemID] = true
+		}
+		if delta != "" && c.onMessage != nil {
+			c.onMessage(Message{Type: MessageText, Content: delta})
+		}
+		return
+	}
+
 	item, ok := params["item"].(map[string]any)
 	if !ok {
 		return
@@ -605,6 +662,16 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		}
 
 	case method == "item/completed" && itemType == "agentMessage":
+		if c.streamedMessageIDs != nil && c.streamedMessageIDs[itemID] {
+			delete(c.streamedMessageIDs, itemID)
+			phase, _ := item["phase"].(string)
+			if phase == "final_answer" && c.turnStarted {
+				if c.onTurnDone != nil {
+					c.onTurnDone(false)
+				}
+			}
+			return
+		}
 		text, _ := item["text"].(string)
 		if text != "" && c.onMessage != nil {
 			c.onMessage(Message{Type: MessageText, Content: text})
@@ -650,4 +717,101 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+func extractString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	value, _ := m[key].(string)
+	return value
+}
+
+func extractCollaborationModes(result json.RawMessage) []codexCollaborationModeSummary {
+	if len(result) == 0 {
+		return nil
+	}
+	var payload codexCollaborationModeList
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return nil
+	}
+	return payload.Data
+}
+
+func extractThreadModel(result json.RawMessage) string {
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Model)
+}
+
+func extractThreadReasoningEffort(result json.RawMessage) string {
+	var payload struct {
+		ReasoningEffort string `json:"reasoningEffort"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.ReasoningEffort)
+}
+
+func buildCodexCollaborationMode(modes []codexCollaborationModeSummary, requestedMode, model, fallbackReasoning string) (any, error) {
+	requestedMode = strings.TrimSpace(requestedMode)
+	model = strings.TrimSpace(model)
+	fallbackReasoning = strings.TrimSpace(fallbackReasoning)
+
+	if requestedMode == "" || requestedMode == "build" {
+		for _, mode := range modes {
+			if strings.TrimSpace(mode.Mode) != "default" {
+				continue
+			}
+			if model == "" {
+				return nil, nil
+			}
+			settings := codexCollaborationModeSetting{Model: model}
+			if reasoning := strings.TrimSpace(derefString(mode.ReasoningEffort)); reasoning != "" {
+				settings.ReasoningEffort = reasoning
+			}
+			return codexCollaborationMode{
+				Mode:     "default",
+				Settings: settings,
+			}, nil
+		}
+		return nil, nil
+	}
+
+	if requestedMode != "plan" {
+		return nil, fmt.Errorf("unsupported codex mode %q", requestedMode)
+	}
+	if model == "" {
+		return nil, fmt.Errorf("missing model for plan collaboration mode")
+	}
+
+	for _, mode := range modes {
+		if strings.TrimSpace(mode.Mode) != "plan" {
+			continue
+		}
+		settings := codexCollaborationModeSetting{Model: model}
+		if reasoning := strings.TrimSpace(derefString(mode.ReasoningEffort)); reasoning != "" {
+			settings.ReasoningEffort = reasoning
+		} else if fallbackReasoning != "" {
+			settings.ReasoningEffort = fallbackReasoning
+		}
+		return codexCollaborationMode{
+			Mode:     "plan",
+			Settings: settings,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("plan collaboration mode not advertised by codex app-server")
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

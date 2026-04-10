@@ -351,7 +351,7 @@ func TestConfirmPlanQueuesBuildTask(t *testing.T) {
 	}
 }
 
-func TestCreateIssueWarnsWhenCodexAutoExecutionIsPaused(t *testing.T) {
+func TestCreateIssueQueuesCodexPlanTask(t *testing.T) {
 	codexAgentID := createTestAgentWithProvider(t, "codex")
 	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
 	if err != nil {
@@ -377,34 +377,22 @@ func TestCreateIssueWarnsWhenCodexAutoExecutionIsPaused(t *testing.T) {
 		t.Fatalf("decode issue response: %v", err)
 	}
 
-	var queued int
+	var mode string
 	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*)
+		SELECT mode
 		FROM agent_task_queue
 		WHERE issue_id = $1
-	`, parseUUID(created.ID)).Scan(&queued); err != nil {
-		t.Fatalf("count tasks: %v", err)
-	}
-	if queued != 0 {
-		t.Fatalf("expected no queued tasks for Codex staged execution, got %d", queued)
-	}
-
-	var warning string
-	if err := testPool.QueryRow(context.Background(), `
-		SELECT content
-		FROM comment
-		WHERE issue_id = $1 AND author_type = 'agent' AND type = 'system'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, parseUUID(created.ID)).Scan(&warning); err != nil {
-		t.Fatalf("load warning comment: %v", err)
+	`, parseUUID(created.ID)).Scan(&mode); err != nil {
+		t.Fatalf("load queued task: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(warning), "codex") {
-		t.Fatalf("expected Codex warning comment, got %q", warning)
+	if mode != service.TaskModePlan {
+		t.Fatalf("expected queued Codex task mode %q, got %q", service.TaskModePlan, mode)
 	}
 }
 
-func TestConfirmPlanRejectsCodexAgent(t *testing.T) {
+func TestConfirmPlanQueuesBuildForCodexAgent(t *testing.T) {
 	codexAgentID := createTestAgentWithProvider(t, "codex")
 	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
 	if err != nil {
@@ -431,11 +419,80 @@ func TestConfirmPlanRejectsCodexAgent(t *testing.T) {
 	req := newRequest("POST", "/api/issues/"+issueID+"/confirm-plan", nil)
 	req = withURLParam(req, "id", issueID)
 	testHandler.ConfirmPlan(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("ConfirmPlan: expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("ConfirmPlan: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(w.Body.String()), "codex") {
-		t.Fatalf("expected Codex conflict message, got %s", w.Body.String())
+
+	var mode string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT mode
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&mode); err != nil {
+		t.Fatalf("load queued task: %v", err)
+	}
+	if mode != service.TaskModeBuild {
+		t.Fatalf("expected queued Codex task mode %q, got %q", service.TaskModeBuild, mode)
+	}
+}
+
+func TestPlanReadyCommentQueuesAnotherPlanRun(t *testing.T) {
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'todo', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9003, NULL, $5, 'plan_ready'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Plan feedback issue", agentID, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "Please revise the plan and also loop in [@Other](mention://member/00000000-0000-0000-0000-000000000001).",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var mode string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT mode
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&mode); err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if mode != service.TaskModePlan {
+		t.Fatalf("expected plan task, got %q", mode)
 	}
 }
 

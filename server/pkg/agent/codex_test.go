@@ -402,6 +402,85 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestCodexRawItemAgentMessageDeltaStreamsText(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var chunks []string
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			chunks = append(chunks, msg.Content)
+		}
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"Plan"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":" updated"}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Plan updated","phase":"commentary"}}}`)
+
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 streamed chunks, got %d", len(chunks))
+	}
+	if chunks[0] != "Plan" || chunks[1] != " updated" {
+		t.Fatalf("unexpected streamed chunks: %#v", chunks)
+	}
+}
+
+func TestBuildCodexCollaborationModePlan(t *testing.T) {
+	t.Parallel()
+
+	mode, err := buildCodexCollaborationMode([]codexCollaborationModeSummary{
+		{
+			Name:            "Plan",
+			Mode:            "plan",
+			ReasoningEffort: ptrString("medium"),
+		},
+	}, "plan", "gpt-5.4", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, ok := mode.(codexCollaborationMode)
+	if !ok {
+		t.Fatalf("expected codexCollaborationMode, got %#v", mode)
+	}
+	if got.Mode != "plan" {
+		t.Fatalf("expected mode=plan, got %q", got.Mode)
+	}
+	if got.Settings.Model != "gpt-5.4" {
+		t.Fatalf("expected model gpt-5.4, got %q", got.Settings.Model)
+	}
+	if got.Settings.ReasoningEffort != "medium" {
+		t.Fatalf("expected reasoning effort medium, got %q", got.Settings.ReasoningEffort)
+	}
+}
+
+func TestBuildCodexCollaborationModeDefaultFallsBackToNil(t *testing.T) {
+	t.Parallel()
+
+	mode, err := buildCodexCollaborationMode(nil, "build", "gpt-5.4", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mode != nil {
+		t.Fatalf("expected nil default collaboration mode, got %#v", mode)
+	}
+}
+
+func TestBuildCodexCollaborationModePlanMissingFails(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildCodexCollaborationMode(nil, "plan", "gpt-5.4", "")
+	if err == nil {
+		t.Fatal("expected error when plan mode is unavailable")
+	}
+}
+
+func ptrString(value string) *string {
+	return &value
+}
+
 func TestCodexRawThreadStatusIdle(t *testing.T) {
 	t.Parallel()
 

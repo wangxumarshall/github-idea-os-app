@@ -363,9 +363,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  const latestPlanTask = taskRuns.find((task) => task.mode === "plan" && task.status === "completed") ?? null;
+  const completedPlanTasks = taskRuns.filter((task) => task.mode === "plan" && task.status === "completed");
+  const latestPlanTask = completedPlanTasks[0] ?? null;
   const latestPlanResult = getTaskResult(latestPlanTask);
   const latestPlanBody = latestPlanResult?.output?.trim() || "";
+  const latestPlanRevision = latestPlanResult?.plan_revision ?? completedPlanTasks.length;
 
   const handleConfirmPlan = useCallback(async () => {
     if (!issue || issue.execution_stage !== "plan_ready" || confirmingPlan) return;
@@ -759,12 +761,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
           {issue.execution_stage === "planning" && (
             <div className="mt-4 rounded-2xl border border-info/20 bg-info/5 p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-info">
-                Planning In Progress
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-info">
+                  Planning In Progress
+                </div>
+                {latestPlanRevision > 0 && (
+                  <span className="rounded-full border border-info/20 bg-background/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Revising v{latestPlanRevision}
+                  </span>
+                )}
               </div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 The assigned coding agent is using plan mode to understand the issue and the full idea context before any build work starts.
               </p>
+              {latestPlanBody && (
+                <div className="mt-4 rounded-xl border border-info/15 bg-background/80 px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
+                  {latestPlanBody}
+                </div>
+              )}
             </div>
           )}
 
@@ -772,11 +786,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/5 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">
-                    Plan Ready
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">
+                      Plan Ready
+                    </div>
+                    {latestPlanRevision > 0 && (
+                      <span className="rounded-full border border-warning/25 bg-background/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        Revision v{latestPlanRevision}
+                      </span>
+                    )}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Review the proposed plan below. Once confirmed, the assigned agent will switch into build mode and start implementation.
+                    Review the proposed plan below. Reply in the issue thread with decisions or requested changes. Once confirmed, the assigned agent will switch into build mode and start implementation.
                   </p>
                 </div>
                 <Button onClick={handleConfirmPlan} disabled={confirmingPlan} className="shrink-0">

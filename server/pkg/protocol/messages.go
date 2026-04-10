@@ -35,6 +35,9 @@ type TaskCompletedPayload struct {
 	DeliveryState     string `json:"delivery_state,omitempty"`
 	HandoffReason     string `json:"handoff_reason,omitempty"`
 	DeliveryCommentID string `json:"delivery_comment_id,omitempty"`
+	PlanCommentID     string `json:"plan_comment_id,omitempty"`
+	PlanRevision      int    `json:"plan_revision,omitempty"`
+	PlanStatus        string `json:"plan_status,omitempty"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
