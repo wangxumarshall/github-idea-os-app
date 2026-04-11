@@ -1,0 +1,21 @@
+研究当前项目skill的功能、实现原理、价值，与agent或runtime如何配合，达成何种目的和效果
+
+---
+
+ok
+
+---
+
+Implement the plan.
+
+---
+
+在项目中如何使用skill
+
+---
+
+如何import skills from skills.sh
+
+---
+
+skills 中 “add skill” -> "import" 增加对github上skill链接的支持，能够导入github上的网页链接，且功能正常，能够让agent正常使用
