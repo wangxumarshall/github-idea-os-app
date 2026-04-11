@@ -1,5 +1,1 @@
-先提交代码
-
----
-
-撰写完整的方案
+Implement the plan.
