@@ -79,6 +79,7 @@ type AgentTaskQueue struct {
 	SessionID        pgtype.Text        `json:"session_id"`
 	WorkDir          pgtype.Text        `json:"work_dir"`
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	TriggerSource    string             `json:"trigger_source"`
 	Mode             string             `json:"mode"`
 }
 

@@ -110,7 +110,7 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 	if err := syncIdeaProjectSpec(ctx, store, gh, cfg, pool, idea); err != nil {
 		slog.Warn("idea job worker: sync project spec failed", "idea_id", idea.ID, "error", err)
 	}
-	if err := enqueueIdeaRootIssueIfReady(ctx, queries, idea); err != nil {
+	if err := enqueueIdeaRootIssueIfReady(ctx, pool, queries, store, idea); err != nil {
 		slog.Warn("idea job worker: enqueue root issue failed", "idea_id", idea.ID, "error", err)
 	}
 	if err := store.MarkJobCompleted(ctx, pool, job.ID); err != nil {
@@ -118,7 +118,7 @@ func processIdeaJob(ctx context.Context, pool db.DBTX, queries *db.Queries, stor
 	}
 }
 
-func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea *service.IdeaRecord) error {
+func enqueueIdeaRootIssueIfReady(ctx context.Context, pool db.DBTX, queries *db.Queries, store *service.IdeaStore, idea *service.IdeaRecord) error {
 	if idea.RootIssueID == "" {
 		return nil
 	}
@@ -134,6 +134,13 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 		return nil
 	}
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return nil
+	}
+	ready, err := isIdeaRootIssueReadyForAutomation(ctx, pool, store, issue)
+	if err != nil {
+		return err
+	}
+	if !ready {
 		return nil
 	}
 
@@ -169,11 +176,12 @@ func enqueueIdeaRootIssueIfReady(ctx context.Context, queries *db.Queries, idea 
 	}
 
 	_, err = queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:   issue.AssigneeID,
-		RuntimeID: agent.RuntimeID,
-		IssueID:   issue.ID,
-		Priority:  priorityToQueueValue(issue.Priority),
-		Mode:      service.PreferredTaskMode(issue),
+		AgentID:       issue.AssigneeID,
+		RuntimeID:     agent.RuntimeID,
+		IssueID:       issue.ID,
+		Priority:      priorityToQueueValue(issue.Priority),
+		Mode:          service.PreferredTaskMode(issue),
+		TriggerSource: service.TaskTriggerSourceEvent,
 	})
 	return err
 }

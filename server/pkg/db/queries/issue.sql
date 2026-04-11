@@ -15,6 +15,11 @@ WHERE id = $1;
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListIssuesAssignedToAgent :many
+SELECT * FROM issue
+WHERE assignee_type = 'agent' AND assignee_id = $1
+ORDER BY updated_at DESC, created_at DESC;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

@@ -62,21 +62,12 @@ func issueStringPtr(value string) *string {
 	return &value
 }
 
-type agentTriggerSnapshot struct {
-	Type    string         `json:"type"`
-	Enabled bool           `json:"enabled"`
-	Config  map[string]any `json:"config"`
-}
+type agentTriggerSnapshot = service.AgentTriggerSnapshot
 
 // defaultAgentTriggers returns the default trigger config for new agents:
-// all three triggers explicitly enabled.
+// event triggers enabled, scheduled disabled with a default config payload.
 func defaultAgentTriggers() []byte {
-	b, _ := json.Marshal([]agentTriggerSnapshot{
-		{Type: "on_assign", Enabled: true},
-		{Type: "on_comment", Enabled: true},
-		{Type: "on_mention", Enabled: true},
-	})
-	return b
+	return service.DefaultAgentTriggers()
 }
 
 func issueToResponse(i db.Issue, issuePrefix string, idea *service.IdeaRecord, rootIssue *db.Issue) IssueResponse {
@@ -839,23 +830,7 @@ func (h *Handler) isAgentMentionTriggerEnabled(ctx context.Context, agentID pgty
 // empty or does not contain the requested type — for backwards compatibility
 // with agents created before explicit trigger config was introduced.
 func agentHasTriggerEnabled(raw []byte, triggerType string) bool {
-	if raw == nil || len(raw) == 0 {
-		return true
-	}
-
-	var triggers []agentTriggerSnapshot
-	if err := json.Unmarshal(raw, &triggers); err != nil {
-		return false
-	}
-	if len(triggers) == 0 {
-		return true // Empty array = default-enabled (backwards compat)
-	}
-	for _, trigger := range triggers {
-		if trigger.Type == triggerType {
-			return trigger.Enabled
-		}
-	}
-	return true // Trigger type not configured = enabled by default
+	return service.AgentHasTriggerEnabled(raw, triggerType)
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {

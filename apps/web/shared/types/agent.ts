@@ -4,7 +4,7 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
-export type AgentTriggerType = "on_assign" | "on_comment" | "scheduled";
+export type AgentTriggerType = "on_assign" | "on_comment" | "on_mention" | "on_scheduled";
 
 export interface RuntimeDevice {
   id: string;
@@ -33,10 +33,10 @@ export interface AgentTool {
 }
 
 export interface AgentTrigger {
-  id: string;
+  id?: string;
   type: AgentTriggerType;
   enabled: boolean;
-  config: Record<string, unknown>;
+  config?: Record<string, unknown> | null;
 }
 
 export interface AgentTask {

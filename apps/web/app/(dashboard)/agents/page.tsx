@@ -26,6 +26,7 @@ import {
   Play,
   ChevronDown,
   ChevronLeft,
+  AtSign,
   Globe,
   Lock,
   Settings,
@@ -74,6 +75,12 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/shared/api";
+import {
+  defaultAgentTriggers as buildDefaultAgentTriggers,
+  normalizeAgentTriggers,
+  normalizeTriggerConfig,
+  type NormalizedAgentTrigger,
+} from "@/shared/agent-triggers";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useRuntimeStore } from "@/features/runtimes";
@@ -151,10 +158,10 @@ function CreateAgentDialog({
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
-        triggers: [
-          { id: generateId(), type: "on_assign", enabled: true, config: {} },
-          { id: generateId(), type: "on_comment", enabled: true, config: {} },
-        ],
+        triggers: buildDefaultAgentTriggers().map((trigger) => ({
+          ...trigger,
+          id: generateId(),
+        })),
       });
       onClose();
     } catch (err) {
@@ -852,19 +859,25 @@ function TriggersTab({
   agent: Agent;
   onSave: (triggers: AgentTrigger[]) => Promise<void>;
 }) {
-  const [triggers, setTriggers] = useState<AgentTrigger[]>(agent.triggers ?? []);
+  const [triggers, setTriggers] = useState<NormalizedAgentTrigger[]>(normalizeAgentTriggers(agent.triggers));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setTriggers(agent.triggers ?? []);
+    setTriggers(normalizeAgentTriggers(agent.triggers));
   }, [agent.id, agent.triggers]);
 
-  const isDirty = JSON.stringify(triggers) !== JSON.stringify(agent.triggers ?? []);
+  const normalizedStoredTriggers = normalizeAgentTriggers(agent.triggers);
+  const isDirty = JSON.stringify(triggers) !== JSON.stringify(normalizedStoredTriggers);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(triggers);
+      await onSave(triggers.map((trigger) => ({
+        id: trigger.id,
+        type: trigger.type,
+        enabled: trigger.enabled,
+        config: trigger.config,
+      })));
     } catch {
       // toast handled by parent
     } finally {
@@ -883,19 +896,65 @@ function TriggersTab({
   };
 
   const addTrigger = (type: AgentTriggerType) => {
-    const newTrigger: AgentTrigger = {
+    const newTrigger: NormalizedAgentTrigger = {
       id: generateId(),
       type,
       enabled: true,
-      config: type === "scheduled" ? { cron: "0 9 * * 1-5", timezone: "UTC" } : {},
+      config: normalizeTriggerConfig(
+        type,
+        type === "on_scheduled" ? {} : {},
+      ),
     };
     setTriggers((prev) => [...prev, newTrigger]);
   };
 
   const updateTriggerConfig = (triggerId: string, config: Record<string, unknown>) => {
     setTriggers((prev) =>
-      prev.map((t) => (t.id === triggerId ? { ...t, config } : t)),
+      prev.map((t) =>
+        t.id === triggerId
+          ? { ...t, config: normalizeTriggerConfig(t.type, config) }
+          : t,
+      ),
     );
+  };
+
+  const triggerIcon = (type: AgentTriggerType) => {
+    switch (type) {
+      case "on_assign":
+        return Bot;
+      case "on_comment":
+        return MessageSquare;
+      case "on_mention":
+        return AtSign;
+      case "on_scheduled":
+        return Timer;
+    }
+  };
+
+  const triggerLabel = (type: AgentTriggerType) => {
+    switch (type) {
+      case "on_assign":
+        return "On Issue Assign";
+      case "on_comment":
+        return "On Comment";
+      case "on_mention":
+        return "On Mention";
+      case "on_scheduled":
+        return "On Scheduled";
+    }
+  };
+
+  const triggerDescription = (trigger: NormalizedAgentTrigger) => {
+    switch (trigger.type) {
+      case "on_assign":
+        return "Runs when an issue is assigned to this agent";
+      case "on_comment":
+        return "Runs when a member comments on the agent's issue";
+      case "on_mention":
+        return "Runs when this agent is explicitly mentioned in an issue comment";
+      case "on_scheduled":
+        return `Cron: ${String(trigger.config.cron ?? "Not set")} · TZ: ${String(trigger.config.timezone ?? "UTC")}`;
+    }
   };
 
   return (
@@ -929,29 +988,14 @@ function TriggersTab({
           >
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                {trigger.type === "on_assign" ? (
-                  <Bot className="h-4 w-4 text-muted-foreground" />
-                ) : trigger.type === "on_comment" ? (
-                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <Timer className="h-4 w-4 text-muted-foreground" />
-                )}
+                {(() => {
+                  const Icon = triggerIcon(trigger.type);
+                  return <Icon className="h-4 w-4 text-muted-foreground" />;
+                })()}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">
-                  {trigger.type === "on_assign"
-                    ? "On Issue Assign"
-                    : trigger.type === "on_comment"
-                      ? "On Comment"
-                      : "Scheduled"}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {trigger.type === "on_assign"
-                    ? "Runs when an issue is assigned to this agent"
-                    : trigger.type === "on_comment"
-                      ? "Runs when a member comments on the agent's issue"
-                      : `Cron: ${(trigger.config as { cron?: string }).cron ?? "Not set"}`}
-                </div>
+                <div className="text-sm font-medium">{triggerLabel(trigger.type)}</div>
+                <div className="text-xs text-muted-foreground">{triggerDescription(trigger)}</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -977,7 +1021,7 @@ function TriggersTab({
               </div>
             </div>
 
-            {trigger.type === "scheduled" && (
+            {trigger.type === "on_scheduled" && (
               <div className="mt-3 grid grid-cols-2 gap-3 pl-12">
                 <div>
                   <Label className="text-xs text-muted-foreground">
@@ -985,7 +1029,7 @@ function TriggersTab({
                   </Label>
                   <Input
                     type="text"
-                    value={(trigger.config as { cron?: string }).cron ?? ""}
+                    value={String(trigger.config.cron ?? "")}
                     onChange={(e) =>
                       updateTriggerConfig(trigger.id, {
                         ...trigger.config,
@@ -1002,7 +1046,7 @@ function TriggersTab({
                   </Label>
                   <Input
                     type="text"
-                    value={(trigger.config as { timezone?: string }).timezone ?? ""}
+                    value={String(trigger.config.timezone ?? "")}
                     onChange={(e) =>
                       updateTriggerConfig(trigger.id, {
                         ...trigger.config,
@@ -1041,11 +1085,20 @@ function TriggersTab({
         <Button
           variant="outline"
           size="xs"
-          onClick={() => addTrigger("scheduled")}
+          onClick={() => addTrigger("on_mention")}
+          className="border-dashed text-muted-foreground hover:text-foreground"
+        >
+          <AtSign className="h-3 w-3" />
+          Add On Mention
+        </Button>
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => addTrigger("on_scheduled")}
           className="border-dashed text-muted-foreground hover:text-foreground"
         >
           <Timer className="h-3 w-3" />
-          Add Scheduled
+          Add On Scheduled
         </Button>
       </div>
     </div>

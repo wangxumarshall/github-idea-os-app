@@ -8,6 +8,11 @@ SELECT * FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListRunnableAgents :many
+SELECT * FROM agent
+WHERE archived_at IS NULL AND runtime_id IS NOT NULL
+ORDER BY created_at ASC;
+
 -- name: GetAgent :one
 SELECT * FROM agent
 WHERE id = $1;
@@ -58,8 +63,8 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, mode, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, $5, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, mode, trigger_comment_id, trigger_source)
+VALUES ($1, $2, $3, 'queued', $4, $5, sqlc.narg(trigger_comment_id), $6)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
@@ -181,6 +186,12 @@ ORDER BY created_at DESC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: GetLatestTaskCreatedAtByIssueAgentSource :one
+SELECT created_at FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2 AND trigger_source = $3
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()

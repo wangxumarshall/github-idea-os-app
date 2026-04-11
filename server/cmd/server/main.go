@@ -73,6 +73,7 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runIdeaJobWorker(sweepCtx, pool, queries)
 	go runIssuePRJobWorker(sweepCtx, pool, queries, bus, taskService)
+	go runScheduledTriggerWorker(sweepCtx, pool, queries, taskService)
 
 	// Graceful shutdown
 	go func() {

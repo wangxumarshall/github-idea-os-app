@@ -316,6 +316,24 @@ func TestAgentHasTriggerEnabled(t *testing.T) {
 			want:        true,
 		},
 		{
+			name:        "on_scheduled not configured defaults disabled",
+			raw:         mustJSON([]agentTriggerSnapshot{{Type: "on_comment", Enabled: true}}),
+			triggerType: "on_scheduled",
+			want:        false,
+		},
+		{
+			name:        "on_scheduled nil triggers defaults disabled",
+			raw:         nil,
+			triggerType: "on_scheduled",
+			want:        false,
+		},
+		{
+			name:        "on_scheduled explicitly enabled",
+			raw:         mustJSON([]agentTriggerSnapshot{{Type: "on_scheduled", Enabled: true, Config: map[string]any{"cron": "0 9 * * 1-5", "timezone": "UTC"}}}),
+			triggerType: "on_scheduled",
+			want:        true,
+		},
+		{
 			name:        "invalid JSON → disabled (fail safe)",
 			raw:         []byte("{bad json"),
 			triggerType: "on_comment",
@@ -345,14 +363,15 @@ func TestDefaultAgentTriggers(t *testing.T) {
 		t.Fatalf("failed to unmarshal default triggers: %v", err)
 	}
 
-	if len(triggers) != 3 {
-		t.Fatalf("expected 3 default triggers, got %d", len(triggers))
+	if len(triggers) != 4 {
+		t.Fatalf("expected 4 default triggers, got %d", len(triggers))
 	}
 
 	expected := map[string]bool{
-		"on_assign":  true,
-		"on_comment": true,
-		"on_mention": true,
+		"on_assign":    true,
+		"on_comment":   true,
+		"on_mention":   true,
+		"on_scheduled": false,
 	}
 	for _, tr := range triggers {
 		want, ok := expected[tr.Type]
@@ -374,6 +393,9 @@ func TestDefaultAgentTriggers(t *testing.T) {
 		if !agentHasTriggerEnabled(raw, typ) {
 			t.Errorf("agentHasTriggerEnabled(default, %q) = false, want true", typ)
 		}
+	}
+	if agentHasTriggerEnabled(raw, "on_scheduled") {
+		t.Errorf("agentHasTriggerEnabled(default, %q) = true, want false", "on_scheduled")
 	}
 }
 

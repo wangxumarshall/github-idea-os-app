@@ -34,17 +34,28 @@ func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskServ
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.EnqueueTaskForIssueInMode(ctx, issue, PreferredTaskMode(issue), triggerCommentID...)
+	return s.EnqueueTaskForIssueInModeWithSource(ctx, issue, PreferredTaskMode(issue), TaskTriggerSourceEvent, triggerCommentID...)
 }
 
 // EnqueueTaskForIssueInMode creates a queued task for an agent-assigned issue
 // in the explicitly requested execution mode.
 func (s *TaskService) EnqueueTaskForIssueInMode(ctx context.Context, issue db.Issue, mode string, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForIssueInModeWithSource(ctx, issue, mode, TaskTriggerSourceEvent, triggerCommentID...)
+}
+
+// EnqueueTaskForIssueInModeWithSource creates a queued task for an
+// agent-assigned issue in the explicitly requested execution mode and stores
+// the originating trigger source for downstream dedupe logic.
+func (s *TaskService) EnqueueTaskForIssueInModeWithSource(ctx context.Context, issue db.Issue, mode, triggerSource string, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
 	}
 	mode = NormalizeTaskMode(mode)
+	triggerSource = strings.TrimSpace(triggerSource)
+	if triggerSource == "" {
+		triggerSource = TaskTriggerSourceEvent
+	}
 
 	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil {
@@ -80,6 +91,7 @@ func (s *TaskService) EnqueueTaskForIssueInMode(ctx context.Context, issue db.Is
 		Priority:         priorityToInt(issue.Priority),
 		Mode:             mode,
 		TriggerCommentID: commentID,
+		TriggerSource:    triggerSource,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -94,13 +106,24 @@ func (s *TaskService) EnqueueTaskForIssueInMode(ctx context.Context, issue db.Is
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.EnqueueTaskForMentionInMode(ctx, issue, agentID, PreferredTaskMode(issue), triggerCommentID)
+	return s.EnqueueTaskForMentionInModeWithSource(ctx, issue, agentID, PreferredTaskMode(issue), TaskTriggerSourceEvent, triggerCommentID)
 }
 
 // EnqueueTaskForMentionInMode creates a queued task for a mentioned agent in
 // the explicitly requested execution mode.
 func (s *TaskService) EnqueueTaskForMentionInMode(ctx context.Context, issue db.Issue, agentID pgtype.UUID, mode string, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForMentionInModeWithSource(ctx, issue, agentID, mode, TaskTriggerSourceEvent, triggerCommentID)
+}
+
+// EnqueueTaskForMentionInModeWithSource creates a queued task for a mentioned
+// agent in the explicitly requested execution mode and records the trigger
+// source for downstream dedupe logic.
+func (s *TaskService) EnqueueTaskForMentionInModeWithSource(ctx context.Context, issue db.Issue, agentID pgtype.UUID, mode, triggerSource string, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	mode = NormalizeTaskMode(mode)
+	triggerSource = strings.TrimSpace(triggerSource)
+	if triggerSource == "" {
+		triggerSource = TaskTriggerSourceEvent
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -130,6 +153,7 @@ func (s *TaskService) EnqueueTaskForMentionInMode(ctx context.Context, issue db.
 		Priority:         priorityToInt(issue.Priority),
 		Mode:             mode,
 		TriggerCommentID: triggerCommentID,
+		TriggerSource:    triggerSource,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)

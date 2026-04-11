@@ -273,6 +273,54 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue
 	return items, nil
 }
 
+const listIssuesAssignedToAgent = `-- name: ListIssuesAssignedToAgent :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, repo_url, idea_id, execution_stage FROM issue
+WHERE assignee_type = 'agent' AND assignee_id = $1
+ORDER BY updated_at DESC, created_at DESC
+`
+
+func (q *Queries) ListIssuesAssignedToAgent(ctx context.Context, assigneeID pgtype.UUID) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listIssuesAssignedToAgent, assigneeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.RepoUrl,
+			&i.IdeaID,
+			&i.ExecutionStage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateIssue = `-- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE($2, title),
