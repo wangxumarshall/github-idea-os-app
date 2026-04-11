@@ -48,7 +48,15 @@ import { FileViewer } from "./file-viewer";
 // Create Skill Dialog
 // ---------------------------------------------------------------------------
 
-function CreateSkillDialog({
+export function detectSkillImportSource(importUrl: string) {
+  const url = importUrl.trim().toLowerCase();
+  if (url.includes("clawhub.ai")) return "clawhub" as const;
+  if (url.includes("skills.sh")) return "skills.sh" as const;
+  if (url.includes("github.com")) return "github" as const;
+  return null;
+}
+
+export function CreateSkillDialog({
   onClose,
   onCreate,
   onImport,
@@ -64,12 +72,7 @@ function CreateSkillDialog({
   const [loading, setLoading] = useState(false);
   const [importError, setImportError] = useState("");
 
-  const detectedSource = (() => {
-    const url = importUrl.trim().toLowerCase();
-    if (url.includes("clawhub.ai")) return "clawhub" as const;
-    if (url.includes("skills.sh")) return "skills.sh" as const;
-    return null;
-  })();
+  const detectedSource = detectSkillImportSource(importUrl);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -101,7 +104,7 @@ function CreateSkillDialog({
         <DialogHeader>
           <DialogTitle>Add Skill</DialogTitle>
           <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh.
+            Create a new skill or import from ClawHub, Skills.sh, or GitHub.
           </DialogDescription>
         </DialogHeader>
 
@@ -159,7 +162,7 @@ function CreateSkillDialog({
             {/* Supported sources — highlight on detection */}
             <div>
               <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
                   detectedSource === "clawhub"
                     ? "border-primary bg-primary/5"
@@ -180,7 +183,20 @@ function CreateSkillDialog({
                     skills.sh/owner/repo/skill
                   </div>
                 </div>
+                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
+                  detectedSource === "github"
+                    ? "border-primary bg-primary/5"
+                    : ""
+                }`}>
+                  <div className="text-xs font-medium">GitHub</div>
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
+                    github.com/owner/repo/tree/ref/...
+                  </div>
+                </div>
               </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                GitHub accepts either a skill folder page or a `SKILL.md` file page.
+              </p>
             </div>
 
             {importError && (
@@ -205,6 +221,8 @@ function CreateSkillDialog({
                   ? "Importing from ClawHub..."
                   : detectedSource === "skills.sh"
                     ? "Importing from Skills.sh..."
+                    : detectedSource === "github"
+                      ? "Importing from GitHub..."
                     : "Importing..."
               ) : (
                 <>

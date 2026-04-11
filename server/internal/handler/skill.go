@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,15 +22,15 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	Config      any    `json:"config"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Content     string  `json:"content"`
+	Config      any     `json:"config"`
 	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 type SkillFileResponse struct {
@@ -408,6 +410,18 @@ type importedFile struct {
 	content string
 }
 
+type importValidationError struct {
+	message string
+}
+
+func (e *importValidationError) Error() string {
+	return e.message
+}
+
+func newImportValidationError(format string, args ...any) error {
+	return &importValidationError{message: fmt.Sprintf(format, args...)}
+}
+
 // --- ClawHub types ---
 
 type clawhubGetSkillResponse struct {
@@ -440,13 +454,20 @@ type clawhubFileEntry struct {
 	Size int64  `json:"size"`
 }
 
-// --- GitHub types (for skills.sh) ---
+// --- GitHub types ---
 
 type githubContentEntry struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
 	DownloadURL string `json:"download_url"`
+}
+
+type githubSkillLocation struct {
+	Owner    string
+	Repo     string
+	Ref      string
+	SkillDir string
 }
 
 // --- URL detection ---
@@ -457,7 +478,10 @@ type importSource int
 const (
 	sourceClawHub importSource = iota
 	sourceSkillsSh
+	sourceGitHub
 )
+
+var githubAPIBaseURL = "https://api.github.com"
 
 // detectImportSource determines the source from a URL.
 // Returns the source and a normalized URL (with scheme).
@@ -483,12 +507,14 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return sourceSkillsSh, normalized, nil
 	case host == "clawhub.ai" || host == "www.clawhub.ai":
 		return sourceClawHub, normalized, nil
+	case host == "github.com" || host == "www.github.com":
+		return sourceGitHub, normalized, nil
 	default:
 		// If no host (bare slug), default to clawhub
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
 			return sourceClawHub, raw, nil
 		}
-		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh)", host)
+		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com)", host)
 	}
 }
 
@@ -498,7 +524,7 @@ func detectImportSource(raw string) (importSource, string, error) {
 func parseClawHubSlug(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
+		return "", newImportValidationError("invalid URL: %v", err)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	// /{owner}/{slug} — take the last segment as the slug
@@ -510,9 +536,9 @@ func parseClawHubSlug(raw string) (string, error) {
 	}
 	// Bare slug (no path)
 	if raw == parsed.Host || parsed.Path == "" || parsed.Path == "/" {
-		return "", fmt.Errorf("missing skill slug in URL")
+		return "", newImportValidationError("missing skill slug in URL")
 	}
-	return "", fmt.Errorf("could not extract skill slug from URL: %s", raw)
+	return "", newImportValidationError("could not extract skill slug from URL: %s", raw)
 }
 
 func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, error) {
@@ -531,7 +557,7 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 	defer skillResp.Body.Close()
 
 	if skillResp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("skill not found on ClawHub: %s", slug)
+		return nil, newImportValidationError("skill not found on ClawHub: %s", slug)
 	}
 	if skillResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ClawHub returned status %d", skillResp.StatusCode)
@@ -604,13 +630,298 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 func parseSkillsShParts(raw string) (owner, repo, skillName string, err error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", "", "", fmt.Errorf("invalid URL: %w", err)
+		return "", "", "", newImportValidationError("invalid URL: %v", err)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("expected URL format: skills.sh/{owner}/{repo}/{skill-name}, got: %s", parsed.Path)
+		return "", "", "", newImportValidationError("expected URL format: skills.sh/{owner}/{repo}/{skill-name}, got: %s", parsed.Path)
 	}
 	return parts[0], parts[1], parts[2], nil
+}
+
+func splitURLPathSegments(u *url.URL) ([]string, error) {
+	rawPath := strings.Trim(u.EscapedPath(), "/")
+	if rawPath == "" {
+		return nil, nil
+	}
+	parts := strings.Split(rawPath, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, decoded)
+	}
+	return segments, nil
+}
+
+func escapeGitHubContentPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	parts := strings.Split(p, "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	return strings.Join(escaped, "/")
+}
+
+func joinSlashPath(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Trim(part, "/")
+		if part == "" {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return strings.Join(filtered, "/")
+}
+
+func githubContentsURL(owner, repo, contentPath string) string {
+	base := strings.TrimRight(githubAPIBaseURL, "/")
+	urlPath := base + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/contents"
+	if contentPath == "" {
+		return urlPath
+	}
+	return urlPath + "/" + escapeGitHubContentPath(contentPath)
+}
+
+func fetchGitHubContentsJSON(httpClient *http.Client, owner, repo, ref, contentPath string) ([]byte, int, error) {
+	endpoint := githubContentsURL(owner, repo, contentPath)
+	if ref != "" {
+		endpoint += "?ref=" + url.QueryEscape(ref)
+	}
+	resp, err := httpClient.Get(endpoint)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return body, resp.StatusCode, nil
+}
+
+func getGitHubFileMetadata(httpClient *http.Client, owner, repo, ref, filePath string) (githubContentEntry, error) {
+	body, status, err := fetchGitHubContentsJSON(httpClient, owner, repo, ref, filePath)
+	if err != nil {
+		return githubContentEntry{}, err
+	}
+	if status != http.StatusOK {
+		return githubContentEntry{}, fmt.Errorf("HTTP %d", status)
+	}
+	var entry githubContentEntry
+	if err := json.Unmarshal(body, &entry); err != nil {
+		return githubContentEntry{}, fmt.Errorf("failed to parse GitHub file response")
+	}
+	if entry.Type != "file" {
+		return githubContentEntry{}, fmt.Errorf("expected file, got %s", entry.Type)
+	}
+	return entry, nil
+}
+
+func listGitHubDirectory(httpClient *http.Client, owner, repo, ref, dirPath string) ([]githubContentEntry, error) {
+	body, status, err := fetchGitHubContentsJSON(httpClient, owner, repo, ref, dirPath)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", status)
+	}
+	var entries []githubContentEntry
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse GitHub directory response")
+	}
+	return entries, nil
+}
+
+func skillFilePath(skillDir string) string {
+	return joinSlashPath(skillDir, "SKILL.md")
+}
+
+func githubSkillExistsAtDir(httpClient *http.Client, owner, repo, ref, skillDir string) (bool, error) {
+	entry, err := getGitHubFileMetadata(httpClient, owner, repo, ref, skillFilePath(skillDir))
+	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 404") {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.EqualFold(entry.Name, "SKILL.md"), nil
+}
+
+func resolveGitHubTreeReference(httpClient *http.Client, owner, repo string, tail []string) (string, string, error) {
+	for split := len(tail) - 1; split >= 1; split-- {
+		ref := strings.Join(tail[:split], "/")
+		skillDir := strings.Join(tail[split:], "/")
+		ok, err := githubSkillExistsAtDir(httpClient, owner, repo, ref, skillDir)
+		if err != nil {
+			return "", "", err
+		}
+		if ok {
+			return ref, skillDir, nil
+		}
+	}
+	return "", "", newImportValidationError("GitHub directory link must point to a skill directory containing SKILL.md")
+}
+
+func resolveGitHubBlobReference(httpClient *http.Client, owner, repo string, tail []string) (string, string, error) {
+	if len(tail) < 2 {
+		return "", "", newImportValidationError("GitHub file link must point to a SKILL.md page")
+	}
+	if !strings.EqualFold(tail[len(tail)-1], "SKILL.md") {
+		return "", "", newImportValidationError("GitHub file link must point to a SKILL.md page")
+	}
+
+	pathTail := tail[:len(tail)-1]
+	for split := len(pathTail); split >= 1; split-- {
+		ref := strings.Join(pathTail[:split], "/")
+		skillDir := strings.Join(pathTail[split:], "/")
+		entry, err := getGitHubFileMetadata(httpClient, owner, repo, ref, skillFilePath(skillDir))
+		if err != nil {
+			if strings.Contains(err.Error(), "HTTP 404") {
+				continue
+			}
+			return "", "", err
+		}
+		if strings.EqualFold(entry.Name, "SKILL.md") {
+			return ref, skillDir, nil
+		}
+	}
+
+	return "", "", newImportValidationError("GitHub file link must point to a SKILL.md page")
+}
+
+func parseGitHubSkillURL(httpClient *http.Client, rawURL string) (githubSkillLocation, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return githubSkillLocation{}, newImportValidationError("invalid URL: %v", err)
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "github.com" && host != "www.github.com" {
+		return githubSkillLocation{}, newImportValidationError("unsupported GitHub host: %s", parsed.Hostname())
+	}
+
+	segments, err := splitURLPathSegments(parsed)
+	if err != nil {
+		return githubSkillLocation{}, newImportValidationError("invalid GitHub path: %v", err)
+	}
+	if len(segments) < 3 {
+		return githubSkillLocation{}, newImportValidationError("expected a GitHub link to a skill directory or SKILL.md page")
+	}
+
+	loc := githubSkillLocation{
+		Owner: segments[0],
+		Repo:  segments[1],
+	}
+	tail := segments[3:]
+	switch segments[2] {
+	case "tree":
+		if len(tail) < 2 {
+			return githubSkillLocation{}, newImportValidationError("GitHub tree link must include a skill directory path")
+		}
+		loc.Ref, loc.SkillDir, err = resolveGitHubTreeReference(httpClient, loc.Owner, loc.Repo, tail)
+	case "blob":
+		loc.Ref, loc.SkillDir, err = resolveGitHubBlobReference(httpClient, loc.Owner, loc.Repo, tail)
+	default:
+		return githubSkillLocation{}, newImportValidationError("expected a GitHub /tree/... directory link or /blob/.../SKILL.md file link")
+	}
+	if err != nil {
+		return githubSkillLocation{}, err
+	}
+	return loc, nil
+}
+
+func collectGitHubFiles(httpClient *http.Client, owner, repo, ref, dirPath string, out *[]githubContentEntry) {
+	entries, err := listGitHubDirectory(httpClient, owner, repo, ref, dirPath)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		lower := strings.ToLower(entry.Name)
+		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
+			continue
+		}
+		if entry.Type == "file" {
+			*out = append(*out, entry)
+			continue
+		}
+		if entry.Type == "dir" {
+			collectGitHubFiles(httpClient, owner, repo, ref, entry.Path, out)
+		}
+	}
+}
+
+func fetchGitHubSkillLocation(httpClient *http.Client, loc githubSkillLocation) (*importedSkill, error) {
+	skillFile, err := getGitHubFileMetadata(httpClient, loc.Owner, loc.Repo, loc.Ref, skillFilePath(loc.SkillDir))
+	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 404") {
+			return nil, newImportValidationError("SKILL.md not found in repository %s/%s at %s", loc.Owner, loc.Repo, skillFilePath(loc.SkillDir))
+		}
+		return nil, fmt.Errorf("fetch GitHub skill metadata: %w", err)
+	}
+	if skillFile.DownloadURL == "" {
+		return nil, fmt.Errorf("GitHub did not provide a download URL for %s", skillFile.Path)
+	}
+
+	skillMdBody, err := fetchRawFile(httpClient, skillFile.DownloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("download GitHub SKILL.md: %w", err)
+	}
+
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		name = path.Base(loc.SkillDir)
+		if name == "." || name == "/" || name == "" {
+			name = loc.Repo
+		}
+	}
+
+	result := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+	}
+
+	var allFiles []githubContentEntry
+	collectGitHubFiles(httpClient, loc.Owner, loc.Repo, loc.Ref, loc.SkillDir, &allFiles)
+
+	basePath := loc.SkillDir
+	if basePath != "" {
+		basePath += "/"
+	}
+	for _, entry := range allFiles {
+		if entry.DownloadURL == "" {
+			continue
+		}
+		body, err := fetchRawFile(httpClient, entry.DownloadURL)
+		if err != nil {
+			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
+			continue
+		}
+		relPath := entry.Path
+		if basePath != "" {
+			relPath = strings.TrimPrefix(entry.Path, basePath)
+		}
+		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
+	}
+
+	return result, nil
+}
+
+func fetchFromGitHubURL(httpClient *http.Client, rawURL string) (*importedSkill, error) {
+	loc, err := parseGitHubSkillURL(httpClient, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return fetchGitHubSkillLocation(httpClient, loc)
 }
 
 func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, error) {
@@ -623,107 +934,28 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	//   skills/{name}/SKILL.md          (most common)
 	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
 	//   {name}/SKILL.md                 (skill at repo root level)
-	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main",
-		url.PathEscape(owner), url.PathEscape(repo))
-
 	candidatePaths := []string{
 		"skills/" + skillName,
 		"plugin/skills/" + skillName,
 		skillName,
 	}
 
-	var skillMdBody []byte
-	var skillDir string
 	for _, dir := range candidatePaths {
-		body, err := fetchRawFile(httpClient, rawPrefix+"/"+dir+"/SKILL.md")
+		ok, err := githubSkillExistsAtDir(httpClient, owner, repo, "main", dir)
 		if err == nil {
-			skillMdBody = body
-			skillDir = dir
-			break
-		}
-	}
-	if skillMdBody == nil {
-		return nil, fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
-	}
-
-	// Parse name and description from YAML frontmatter
-	name, description := parseSkillFrontmatter(string(skillMdBody))
-	if name == "" {
-		name = skillName
-	}
-
-	result := &importedSkill{
-		name:        name,
-		description: description,
-		content:     string(skillMdBody),
-	}
-
-	// 2. List supporting files via GitHub API
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s",
-		url.PathEscape(owner), url.PathEscape(repo), skillDir)
-	dirResp, err := httpClient.Get(apiURL)
-	if err != nil || dirResp.StatusCode != http.StatusOK {
-		// Can't list files — return what we have (SKILL.md only)
-		if dirResp != nil {
-			dirResp.Body.Close()
-		}
-		return result, nil
-	}
-	defer dirResp.Body.Close()
-
-	var entries []githubContentEntry
-	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
-		return result, nil
-	}
-
-	// 3. Recursively collect files (excluding SKILL.md and LICENSE)
-	var allFiles []githubContentEntry
-	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
-
-	// 4. Download each file
-	basePath := skillDir + "/"
-	for _, entry := range allFiles {
-		if entry.DownloadURL == "" {
-			continue
-		}
-		body, err := fetchRawFile(httpClient, entry.DownloadURL)
-		if err != nil {
-			slog.Warn("skills.sh import: file download failed", "path", entry.Path, "error", err)
-			continue
-		}
-		// Convert absolute GitHub path to relative path within skill
-		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
-	}
-
-	return result, nil
-}
-
-// collectGitHubFiles recursively collects file entries from a GitHub directory listing.
-func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
-	for _, entry := range entries {
-		lower := strings.ToLower(entry.Name)
-		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
-			continue
-		}
-		if entry.Type == "file" {
-			*out = append(*out, entry)
-		} else if entry.Type == "dir" {
-			// Fetch subdirectory contents
-			subURL := parentURL + "/" + url.PathEscape(entry.Name)
-			subResp, err := httpClient.Get(subURL)
-			if err != nil || subResp.StatusCode != http.StatusOK {
-				if subResp != nil {
-					subResp.Body.Close()
-				}
-				continue
+			if ok {
+				return fetchGitHubSkillLocation(httpClient, githubSkillLocation{
+					Owner:    owner,
+					Repo:     repo,
+					Ref:      "main",
+					SkillDir: dir,
+				})
 			}
-			var subEntries []githubContentEntry
-			json.NewDecoder(subResp.Body).Decode(&subEntries)
-			subResp.Body.Close()
-			collectGitHubFiles(httpClient, subEntries, out, subURL)
+			continue
 		}
+		return nil, fmt.Errorf("resolve skills.sh import path: %w", err)
 	}
+	return nil, newImportValidationError("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
 }
 
 // parseSkillFrontmatter extracts name and description from YAML frontmatter in SKILL.md.
@@ -794,8 +1026,15 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		imported, err = fetchFromClawHub(httpClient, normalized)
 	case sourceSkillsSh:
 		imported, err = fetchFromSkillsSh(httpClient, normalized)
+	case sourceGitHub:
+		imported, err = fetchFromGitHubURL(httpClient, normalized)
 	}
 	if err != nil {
+		var validationErr *importValidationError
+		if errors.As(err, &validationErr) {
+			writeError(w, http.StatusBadRequest, validationErr.Error())
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
