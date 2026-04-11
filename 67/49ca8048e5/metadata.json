@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "6749ca8048e5",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "apps/web/app/(dashboard)/agents/page.tsx",
+    "apps/web/shared/agent-triggers.test.ts",
+    "apps/web/shared/agent-triggers.ts",
+    "apps/web/shared/types/agent.ts",
+    "server/cmd/server/idea_job_worker.go",
+    "server/cmd/server/issue_auto_enqueue.go",
+    "server/cmd/server/main.go",
+    "server/cmd/server/scheduled_trigger_worker.go",
+    "server/cmd/server/scheduled_trigger_worker_test.go",
+    "server/internal/handler/issue.go",
+    "server/internal/handler/trigger_test.go",
+    "server/internal/service/agent_trigger.go",
+    "server/internal/service/agent_trigger_test.go",
+    "server/internal/service/task.go",
+    "server/internal/service/task_trigger_source.go",
+    "server/migrations/029_task_trigger_source.down.sql",
+    "server/migrations/029_task_trigger_source.up.sql",
+    "server/pkg/db/generated/agent.sql.go",
+    "server/pkg/db/generated/issue.sql.go",
+    "server/pkg/db/generated/models.go",
+    "server/pkg/db/queries/agent.sql",
+    "server/pkg/db/queries/issue.sql"
+  ],
+  "sessions": [
+    {
+      "metadata": "/67/49ca8048e5/0/metadata.json",
+      "transcript": "/67/49ca8048e5/0/full.jsonl",
+      "content_hash": "/67/49ca8048e5/0/content_hash.txt",
+      "prompt": "/67/49ca8048e5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 30343863,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 30153216,
+    "output_tokens": 76801,
+    "api_call_count": 168
+  }
+}
