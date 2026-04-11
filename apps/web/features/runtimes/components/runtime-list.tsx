@@ -44,13 +44,15 @@ export function RuntimeList({
   runtimes,
   selectedId,
   onSelect,
+  showBorder = true,
 }: {
   runtimes: AgentRuntime[];
   selectedId: string;
   onSelect: (id: string) => void;
+  showBorder?: boolean;
 }) {
   return (
-    <div className="overflow-y-auto h-full border-r">
+    <div className={`overflow-y-auto h-full ${showBorder ? "border-r" : ""}`}>
       <div className="flex h-12 items-center justify-between border-b px-4">
         <h1 className="text-sm font-semibold">Runtimes</h1>
         <span className="text-xs text-muted-foreground">

@@ -25,6 +25,7 @@ import {
   MoreHorizontal,
   Play,
   ChevronDown,
+  ChevronLeft,
   Globe,
   Lock,
   Settings,
@@ -77,6 +78,8 @@ import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useRuntimeStore } from "@/features/runtimes";
 import { useIssueStore } from "@/features/issues";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useQueryParamSelection } from "@/shared/hooks/use-query-param-selection";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 
@@ -1376,12 +1379,14 @@ function AgentDetail({
   onUpdate,
   onArchive,
   onRestore,
+  onBack,
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
+  onBack?: () => void;
 }) {
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
@@ -1403,7 +1408,18 @@ function AgentDetail({
       )}
 
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+      <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+        {onBack && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2"
+            onClick={onBack}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Agents
+          </Button>
+        )}
         <ActorAvatar actorType="agent" actorId={agent.id} size={28} className={`rounded-md ${isArchived ? "opacity-50" : ""}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -1451,25 +1467,27 @@ function AgentDetail({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b px-6">
-        {detailTabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-              activeTab === tab.id
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto border-b">
+        <div className="flex min-w-max px-3 sm:px-6">
+          {detailTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+                activeTab === tab.id
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {activeTab === "instructions" && (
           <InstructionsTab
             agent={agent}
@@ -1546,7 +1564,8 @@ export default function AgentsPage() {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const agents = useWorkspaceStore((s) => s.agents);
   const refreshAgents = useWorkspaceStore((s) => s.refreshAgents);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const isMobile = useIsMobile();
+  const [selectedId, setSelectedId] = useQueryParamSelection("agent");
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const runtimes = useRuntimeStore((s) => s.runtimes);
@@ -1566,10 +1585,9 @@ export default function AgentsPage() {
 
   const archivedCount = useMemo(() => agents.filter((a) => !!a.archived_at).length, [agents]);
 
-  // Select first agent on initial load or when filter changes
   useEffect(() => {
-    if (filteredAgents.length > 0 && !filteredAgents.some((a) => a.id === selectedId)) {
-      setSelectedId(filteredAgents[0]!.id);
+    if (selectedId && !filteredAgents.some((agent) => agent.id === selectedId)) {
+      setSelectedId(filteredAgents[0]?.id ?? "", { replace: true });
     }
   }, [filteredAgents, selectedId]);
 
@@ -1610,7 +1628,8 @@ export default function AgentsPage() {
     }
   };
 
-  const selected = agents.find((a) => a.id === selectedId) ?? null;
+  const effectiveSelectedId = selectedId || (!isMobile ? filteredAgents[0]?.id ?? "" : "");
+  const selected = agents.find((a) => a.id === effectiveSelectedId) ?? null;
 
   if (isLoading) {
     return (
@@ -1652,87 +1671,37 @@ export default function AgentsPage() {
     );
   }
 
-  return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — agent list */}
-        <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">Agents</h1>
-            <div className="flex items-center gap-1">
-              {archivedCount > 0 && (
-                <Button
-                  variant={showArchived ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? "Show active agents" : "Show archived agents"}
-                >
-                  <Archive className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setShowCreate(true)}
-              >
-                <Plus className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
-          </div>
-          {filteredAgents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Bot className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
-              </p>
-              {!showArchived && (
-                <Button
-                  onClick={() => setShowCreate(true)}
-                  size="xs"
-                  className="mt-3"
-                >
-                  <Plus className="h-3 w-3" />
-                  Create Agent
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="divide-y">
-              {filteredAgents.map((agent) => (
-                <AgentListItem
-                  key={agent.id}
-                  agent={agent}
-                  isSelected={agent.id === selectedId}
-                  onClick={() => setSelectedId(agent.id)}
-                />
-              ))}
-            </div>
+  const renderList = (showBorder: boolean) => (
+    <div className={`h-full overflow-y-auto ${showBorder ? "border-r" : ""}`}>
+      <div className="flex h-12 items-center justify-between border-b px-4">
+        <h1 className="text-sm font-semibold">Agents</h1>
+        <div className="flex items-center gap-1">
+          {archivedCount > 0 && (
+            <Button
+              variant={showArchived ? "secondary" : "ghost"}
+              size="icon-xs"
+              onClick={() => setShowArchived(!showArchived)}
+              title={showArchived ? "Show active agents" : "Show archived agents"}
+            >
+              <Archive className="h-4 w-4 text-muted-foreground" />
+            </Button>
           )}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setShowCreate(true)}
+          >
+            <Plus className="h-4 w-4 text-muted-foreground" />
+          </Button>
         </div>
-      </ResizablePanel>
-
-      <ResizableHandle />
-
-      <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — agent detail */}
-        {selected ? (
-          <AgentDetail
-            key={selected.id}
-            agent={selected}
-            runtimes={runtimes}
-            onUpdate={handleUpdate}
-            onArchive={handleArchive}
-            onRestore={handleRestore}
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select an agent to view details</p>
+      </div>
+      {filteredAgents.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-4 py-12">
+          <Bot className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
+          </p>
+          {!showArchived && (
             <Button
               onClick={() => setShowCreate(true)}
               size="xs"
@@ -1741,9 +1710,72 @@ export default function AgentsPage() {
               <Plus className="h-3 w-3" />
               Create Agent
             </Button>
-          </div>
-        )}
-      </ResizablePanel>
+          )}
+        </div>
+      ) : (
+        <div className="divide-y">
+          {filteredAgents.map((agent) => (
+            <AgentListItem
+              key={agent.id}
+              agent={agent}
+              isSelected={agent.id === effectiveSelectedId}
+              onClick={() => setSelectedId(agent.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderDetail = (withBack: boolean) => (
+    selected ? (
+      <AgentDetail
+        key={selected.id}
+        agent={selected}
+        runtimes={runtimes}
+        onUpdate={handleUpdate}
+        onArchive={handleArchive}
+        onRestore={handleRestore}
+        onBack={withBack ? () => setSelectedId("") : undefined}
+      />
+    ) : (
+      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+        <Bot className="h-10 w-10 text-muted-foreground/30" />
+        <p className="mt-3 text-sm">Select an agent to view details</p>
+        <Button
+          onClick={() => setShowCreate(true)}
+          size="xs"
+          className="mt-3"
+        >
+          <Plus className="h-3 w-3" />
+          Create Agent
+        </Button>
+      </div>
+    )
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        selected ? renderDetail(true) : renderList(false)
+      ) : (
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="flex-1 min-h-0"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
+        >
+          <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
+            {renderList(true)}
+          </ResizablePanel>
+
+          <ResizableHandle />
+
+          <ResizablePanel id="detail" minSize="50%">
+            {renderDetail(false)}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       {showCreate && (
         <CreateAgentDialog
@@ -1752,6 +1784,6 @@ export default function AgentsPage() {
           onCreate={handleCreate}
         />
       )}
-    </ResizablePanelGroup>
+    </>
   );
 }

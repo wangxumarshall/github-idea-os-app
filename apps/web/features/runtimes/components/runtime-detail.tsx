@@ -1,4 +1,6 @@
+import { ChevronLeft } from "lucide-react";
 import type { AgentRuntime } from "@/shared/types";
+import { Button } from "@/components/ui/button";
 import { formatLastSeen } from "../utils";
 import { RuntimeModeIcon, StatusBadge, InfoField } from "./shared";
 import { PingSection } from "./ping-section";
@@ -16,15 +18,32 @@ function getCliVersion(metadata: Record<string, unknown>): string | null {
   return null;
 }
 
-export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+export function RuntimeDetail({
+  runtime,
+  onBack,
+}: {
+  runtime: AgentRuntime;
+  onBack?: () => void;
+}) {
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2"
+              onClick={onBack}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Runtimes
+            </Button>
+          )}
           <div
             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
               runtime.status === "online" ? "bg-success/10" : "bg-muted"
@@ -40,9 +59,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
         {/* Info grid */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <InfoField label="Runtime Mode" value={runtime.runtime_mode} />
           <InfoField label="Provider" value={runtime.provider} />
           <InfoField label="Status" value={runtime.status} />
@@ -103,7 +122,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         )}
 
         {/* Timestamps */}
-        <div className="grid grid-cols-2 gap-4 border-t pt-4">
+        <div className="grid grid-cols-1 gap-4 border-t pt-4 sm:grid-cols-2">
           <InfoField
             label="Created"
             value={new Date(runtime.created_at).toLocaleString()}

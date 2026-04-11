@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useWSEvent } from "@/features/realtime";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useQueryParamSelection } from "@/shared/hooks/use-query-param-selection";
 import { useRuntimeStore } from "../store";
 import { RuntimeList } from "./runtime-list";
 import { RuntimeDetail } from "./runtime-detail";
@@ -20,10 +22,12 @@ export default function RuntimesPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const runtimes = useRuntimeStore((s) => s.runtimes);
-  const selectedId = useRuntimeStore((s) => s.selectedId);
+  const storeSelectedId = useRuntimeStore((s) => s.selectedId);
   const fetching = useRuntimeStore((s) => s.fetching);
   const fetchRuntimes = useRuntimeStore((s) => s.fetchRuntimes);
-  const setSelectedId = useRuntimeStore((s) => s.setSelectedId);
+  const setStoreSelectedId = useRuntimeStore((s) => s.setSelectedId);
+  const isMobile = useIsMobile();
+  const [urlSelectedId, setUrlSelectedId] = useQueryParamSelection("runtime");
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
@@ -33,6 +37,27 @@ export default function RuntimesPage() {
     if (workspace) fetchRuntimes();
   }, [workspace, fetchRuntimes]);
 
+  useEffect(() => {
+    if (urlSelectedId && urlSelectedId !== storeSelectedId) {
+      setStoreSelectedId(urlSelectedId);
+    }
+  }, [storeSelectedId, setStoreSelectedId, urlSelectedId]);
+
+  const effectiveSelectedId = urlSelectedId || (!isMobile ? storeSelectedId : "");
+
+  useEffect(() => {
+    if (!runtimes.length) {
+      if (urlSelectedId) {
+        setUrlSelectedId("", { replace: true });
+      }
+      return;
+    }
+
+    if (urlSelectedId && !runtimes.some((runtime) => runtime.id === urlSelectedId)) {
+      setUrlSelectedId("", { replace: true });
+    }
+  }, [runtimes, setUrlSelectedId, urlSelectedId]);
+
   // Re-fetch on daemon register/deregister events.
   // Heartbeat events are not broadcast over WS, so no handler needed.
   const handleDaemonEvent = useCallback(() => {
@@ -41,12 +66,11 @@ export default function RuntimesPage() {
 
   useWSEvent("daemon:register", handleDaemonEvent);
 
-  const selected = runtimes.find((r) => r.id === selectedId) ?? null;
+  const selected = runtimes.find((r) => r.id === effectiveSelectedId) ?? null;
 
   if (isLoading || fetching) {
     return (
-      <div className="flex flex-1 min-h-0">
-        {/* List skeleton */}
+      <div className="flex min-h-0 flex-1">
         <div className="w-72 border-r">
           <div className="flex h-12 items-center justify-between border-b px-4">
             <Skeleton className="h-4 w-20" />
@@ -63,8 +87,7 @@ export default function RuntimesPage() {
             ))}
           </div>
         </div>
-        {/* Detail skeleton */}
-        <div className="flex-1 p-6 space-y-6">
+        <div className="flex-1 space-y-6 p-6">
           <div className="flex items-center gap-3">
             <Skeleton className="h-5 w-5 rounded" />
             <Skeleton className="h-5 w-32" />
@@ -76,6 +99,30 @@ export default function RuntimesPage() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (isMobile) {
+    if (!selected) {
+      return (
+        <RuntimeList
+          runtimes={runtimes}
+          selectedId=""
+          onSelect={(id) => {
+            setStoreSelectedId(id);
+            setUrlSelectedId(id);
+          }}
+          showBorder={false}
+        />
+      );
+    }
+
+    return (
+      <RuntimeDetail
+        key={selected.id}
+        runtime={selected}
+        onBack={() => setUrlSelectedId("")}
+      />
     );
   }
 
@@ -95,8 +142,11 @@ export default function RuntimesPage() {
       >
         <RuntimeList
           runtimes={runtimes}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedId={effectiveSelectedId}
+          onSelect={(id) => {
+            setStoreSelectedId(id);
+            setUrlSelectedId(id);
+          }}
         />
       </ResizablePanel>
 

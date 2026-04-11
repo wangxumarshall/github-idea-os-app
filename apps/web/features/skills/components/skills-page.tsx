@@ -9,6 +9,9 @@ import {
   Save,
   AlertCircle,
   Download,
+  ChevronLeft,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@/shared/types";
 import {
@@ -35,6 +38,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useQueryParamSelection } from "@/shared/hooks/use-query-param-selection";
 
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
@@ -341,11 +346,14 @@ function SkillDetail({
   skill,
   onUpdate,
   onDelete,
+  onBack,
 }: {
   skill: Skill;
   onUpdate: (id: string, data: UpdateSkillRequest) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onBack?: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
   const [content, setContent] = useState(skill.content);
@@ -357,6 +365,7 @@ function SkillDetail({
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddFile, setShowAddFile] = useState(false);
+  const [showFiles, setShowFiles] = useState(!isMobile);
 
   // Sync basic fields from store updates
   useEffect(() => {
@@ -376,6 +385,10 @@ function SkillDetail({
       toast.error(e instanceof Error ? e.message : "Failed to load skill files");
     }).finally(() => setLoadingFiles(false));
   }, [skill.id]);
+
+  useEffect(() => {
+    setShowFiles(!isMobile);
+  }, [isMobile, skill.id]);
 
   // Build the virtual file map
   const fileMap = useMemo(() => buildFileMap(content, files), [content, files]);
@@ -417,9 +430,19 @@ function SkillDetail({
     }
   };
 
+  const handleSelectPath = (path: string) => {
+    setSelectedPath(path);
+    if (isMobile) {
+      setShowFiles(false);
+    }
+  };
+
   const handleAddFile = (path: string) => {
     setFiles((prev) => [...prev, { path, content: "" }]);
     setSelectedPath(path);
+    if (isMobile) {
+      setShowFiles(false);
+    }
   };
 
   const handleDeleteFile = () => {
@@ -431,133 +454,245 @@ function SkillDetail({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-            <Sparkles className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 flex-1 min-w-0">
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-8 text-sm font-medium"
-              placeholder="Skill name"
-            />
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Description"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 ml-3">
-          {isDirty && (
-            <Button onClick={handleSave} disabled={saving || !name.trim()} size="xs">
-              <Save className="h-3 w-3" />
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
+      <div className="border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-3">
+              {onBack && (
                 <Button
                   variant="ghost"
-                  size="xs"
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive"
+                  size="sm"
+                  className="-ml-2"
+                  onClick={onBack}
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <ChevronLeft className="h-4 w-4" />
+                  Skills
                 </Button>
-              }
-            />
-            <TooltipContent>Delete skill</TooltipContent>
-          </Tooltip>
+              )}
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{skill.name}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {skill.description || "Skill details"}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="h-9 text-sm font-medium"
+                placeholder="Skill name"
+              />
+              <Input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="h-9 text-sm"
+                placeholder="Description"
+              />
+            </div>
+          </div>
+          <div className="ml-3 flex items-center gap-2">
+            {isDirty && (
+              <Button onClick={handleSave} disabled={saving || !name.trim()} size="xs">
+                <Save className="h-3 w-3" />
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setConfirmDelete(true)}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Delete skill</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
 
       {/* File browser: tree + viewer */}
-      <div className="flex flex-1 min-h-0">
-        {/* File tree */}
-        <div className="w-52 shrink-0 border-r flex flex-col">
-          <div className="flex h-10 items-center justify-between border-b px-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Files
-            </span>
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setShowAddFile(true)}
-                      className="text-muted-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Add file</TooltipContent>
-              </Tooltip>
-              {selectedPath !== SKILL_MD && (
+      {isMobile ? (
+        <div className="flex flex-1 min-h-0 flex-col">
+          <div className="border-b px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowFiles((value) => !value)}
+                className="flex items-center gap-2 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {showFiles ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+                Files
+              </button>
+              <div className="flex items-center gap-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={handleDeleteFile}
-                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setShowAddFile(true)}
+                        className="text-muted-foreground"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Plus className="h-3.5 w-3.5" />
                       </Button>
                     }
                   />
-                  <TooltipContent>Delete file</TooltipContent>
+                  <TooltipContent>Add file</TooltipContent>
                 </Tooltip>
-              )}
+                {selectedPath !== SKILL_MD && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={handleDeleteFile}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent>Delete file</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+            <div className="mt-1 truncate px-1 text-[11px] text-muted-foreground">
+              {selectedPath}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          {showFiles && (
+            <div className="max-h-56 shrink-0 overflow-y-auto border-b">
+              {loadingFiles ? (
+                <div className="space-y-2 p-3">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ) : (
+                <FileTree
+                  filePaths={filePaths}
+                  selectedPath={selectedPath}
+                  onSelect={handleSelectPath}
+                />
+              )}
+            </div>
+          )}
+          <div className="min-h-0 flex-1">
             {loadingFiles ? (
-              <div className="p-3 space-y-2">
+              <div className="space-y-3 p-4">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-4/6" />
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
               </div>
             ) : (
-              <FileTree
-                filePaths={filePaths}
-                selectedPath={selectedPath}
-                onSelect={setSelectedPath}
+              <FileViewer
+                key={selectedPath}
+                path={selectedPath}
+                content={selectedContent}
+                onChange={handleFileContentChange}
               />
             )}
           </div>
         </div>
-
-        {/* File viewer */}
-        <div className="flex-1 min-w-0">
-          {loadingFiles ? (
-            <div className="p-4 space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-4/6" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
+      ) : (
+        <div className="flex flex-1 min-h-0">
+          <div className="flex w-52 shrink-0 flex-col border-r">
+            <div className="flex h-10 items-center justify-between border-b px-3">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Files
+              </span>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setShowAddFile(true)}
+                        className="text-muted-foreground"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Add file</TooltipContent>
+                </Tooltip>
+                {selectedPath !== SKILL_MD && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={handleDeleteFile}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent>Delete file</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
             </div>
-          ) : (
-          <FileViewer
-            key={selectedPath}
-            path={selectedPath}
-            content={selectedContent}
-            onChange={handleFileContentChange}
-          />
-          )}
+            <div className="flex-1 overflow-y-auto">
+              {loadingFiles ? (
+                <div className="space-y-2 p-3">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ) : (
+                <FileTree
+                  filePaths={filePaths}
+                  selectedPath={selectedPath}
+                  onSelect={handleSelectPath}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {loadingFiles ? (
+              <div className="space-y-3 p-4">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-4/6" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ) : (
+              <FileViewer
+                key={selectedPath}
+                path={selectedPath}
+                content={selectedContent}
+                onChange={handleFileContentChange}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Add file dialog */}
       {showAddFile && (
@@ -611,18 +746,18 @@ function SkillDetail({
 export default function SkillsPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const skills = useWorkspaceStore((s) => s.skills);
-  const refreshSkills = useWorkspaceStore((s) => s.refreshSkills);
   const upsertSkill = useWorkspaceStore((s) => s.upsertSkill);
   const removeSkill = useWorkspaceStore((s) => s.removeSkill);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const isMobile = useIsMobile();
+  const [selectedId, setSelectedId] = useQueryParamSelection("skill");
   const [showCreate, setShowCreate] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_skills_layout",
   });
 
   useEffect(() => {
-    if (skills.length > 0 && !selectedId) {
-      setSelectedId(skills[0]!.id);
+    if (selectedId && !skills.some((skill) => skill.id === selectedId)) {
+      setSelectedId("", { replace: true });
     }
   }, [skills, selectedId]);
 
@@ -665,7 +800,8 @@ export default function SkillsPage() {
     }
   };
 
-  const selected = skills.find((s) => s.id === selectedId) ?? null;
+  const effectiveSelectedId = selectedId || (!isMobile ? skills[0]?.id ?? "" : "");
+  const selected = skills.find((s) => s.id === effectiveSelectedId) ?? null;
 
   if (isLoading) {
     return (
@@ -711,92 +847,105 @@ export default function SkillsPage() {
     );
   }
 
-  return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — skill list */}
-        <div className="overflow-y-auto h-full border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
-            </Tooltip>
-          </div>
-          {skills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
-              <p className="mt-1 text-xs text-muted-foreground text-center">
-                Skills define reusable instructions for agents.
-              </p>
+  const renderList = (showBorder: boolean) => (
+    <div className={`h-full overflow-y-auto ${showBorder ? "border-r" : ""}`}>
+      <div className="flex h-12 items-center justify-between border-b px-4">
+        <h1 className="text-sm font-semibold">Skills</h1>
+        <Tooltip>
+          <TooltipTrigger
+            render={
               <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
               >
-                <Plus className="h-3 w-3" />
-                Create Skill
+                <Plus className="h-4 w-4 text-muted-foreground" />
               </Button>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
-            </div>
-          )}
+            }
+          />
+          <TooltipContent side="bottom">Create skill</TooltipContent>
+        </Tooltip>
+      </div>
+      {skills.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-4 py-12">
+          <Sparkles className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">No skills yet</p>
+          <p className="mt-1 text-center text-xs text-muted-foreground">
+            Skills define reusable instructions for agents.
+          </p>
+          <Button
+            onClick={() => setShowCreate(true)}
+            size="xs"
+            className="mt-3"
+          >
+            <Plus className="h-3 w-3" />
+            Create Skill
+          </Button>
         </div>
-      </ResizablePanel>
-
-      <ResizableHandle />
-
-      <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — skill detail */}
-        <div className="flex-1 overflow-hidden h-full">
-          {selected ? (
-            <SkillDetail
-              key={selected.id}
-              skill={selected}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
+      ) : (
+        <div className="divide-y">
+          {skills.map((skill) => (
+            <SkillListItem
+              key={skill.id}
+              skill={skill}
+              isSelected={skill.id === effectiveSelectedId}
+              onClick={() => setSelectedId(skill.id)}
             />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-              <Sparkles className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a skill to view details</p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          )}
+          ))}
         </div>
-      </ResizablePanel>
+      )}
+    </div>
+  );
+
+  const renderDetail = (withBack: boolean) => (
+    <div className="h-full overflow-hidden">
+      {selected ? (
+        <SkillDetail
+          key={selected.id}
+          skill={selected}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+          onBack={withBack ? () => setSelectedId("") : undefined}
+        />
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+          <Sparkles className="h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-3 text-sm">Select a skill to view details</p>
+          <Button
+            onClick={() => setShowCreate(true)}
+            size="xs"
+            className="mt-3"
+          >
+            <Plus className="h-3 w-3" />
+            Create Skill
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        selected ? renderDetail(true) : renderList(false)
+      ) : (
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="flex-1 min-h-0"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
+        >
+          <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
+            {renderList(true)}
+          </ResizablePanel>
+
+          <ResizableHandle />
+
+          <ResizablePanel id="detail" minSize="50%">
+            {renderDetail(false)}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       {showCreate && (
         <CreateSkillDialog
@@ -805,6 +954,6 @@ export default function SkillsPage() {
           onImport={handleImport}
         />
       )}
-    </ResizablePanelGroup>
+    </>
   );
 }

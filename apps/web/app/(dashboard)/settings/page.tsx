@@ -1,10 +1,22 @@
 "use client";
 
 import { useMemo } from "react";
-import { useSearchParams } from "next/navigation";
-import { User, Palette, Key, Settings, Users, FolderGit2, Lightbulb } from "lucide-react";
+import {
+  User,
+  Palette,
+  Key,
+  Settings,
+  Users,
+  FolderGit2,
+  Lightbulb,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/features/workspace";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useQueryParamSelection } from "@/shared/hooks/use-query-param-selection";
 import { AccountTab } from "./_components/account-tab";
 import { AppearanceTab } from "./_components/general-tab";
 import { TokensTab } from "./_components/tokens-tab";
@@ -26,22 +38,150 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
 ];
 
+const allTabs = [...accountTabs, ...workspaceTabs];
+
+function SettingsContent() {
+  return (
+    <>
+      <TabsContent value="profile"><AccountTab /></TabsContent>
+      <TabsContent value="appearance"><AppearanceTab /></TabsContent>
+      <TabsContent value="tokens"><TokensTab /></TabsContent>
+      <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
+      <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+      <TabsContent value="ideas"><IdeaOSTab /></TabsContent>
+      <TabsContent value="members"><MembersTab /></TabsContent>
+    </>
+  );
+}
+
+function MobileSettingsList({
+  workspaceName,
+  onSelect,
+}: {
+  workspaceName?: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="border-b px-4 py-3">
+        <h1 className="text-base font-semibold">Settings</h1>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 py-4">
+        <div>
+          <div className="px-3 pb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            My Account
+          </div>
+          <div className="space-y-1">
+            {accountTabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onSelect(tab.value)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-muted"
+              >
+                <tab.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {tab.label}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="px-3 pb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            {workspaceName ?? "Workspace"}
+          </div>
+          <div className="space-y-1">
+            {workspaceTabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onSelect(tab.value)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-muted"
+              >
+                <tab.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {tab.label}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
-  const searchParams = useSearchParams();
-  const defaultTab = useMemo(() => {
-    const tab = searchParams.get("tab");
-    const allTabs = new Set([...accountTabs, ...workspaceTabs].map((item) => item.value));
-    return tab && allTabs.has(tab) ? tab : "profile";
-  }, [searchParams]);
+  const isMobile = useIsMobile();
+  const [urlTab, setUrlTab] = useQueryParamSelection("tab");
+
+  const validTabs = useMemo(
+    () => new Map(allTabs.map((item) => [item.value, item])),
+    [],
+  );
+
+  const activeTab = urlTab && validTabs.has(urlTab)
+    ? urlTab
+    : isMobile
+      ? ""
+      : "profile";
+
+  const activeTabMeta = activeTab ? validTabs.get(activeTab) ?? null : null;
+
+  if (isMobile) {
+    if (!activeTab) {
+      return (
+        <MobileSettingsList
+          workspaceName={workspaceName}
+          onSelect={(value) => setUrlTab(value)}
+        />
+      );
+    }
+
+    return (
+      <Tabs value={activeTab} className="flex-1 min-h-0 gap-0">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2"
+              onClick={() => setUrlTab("")}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Settings
+            </Button>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">
+                {activeTabMeta?.label ?? "Settings"}
+              </div>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-3xl px-4 py-4">
+              <SettingsContent />
+            </div>
+          </div>
+        </div>
+      </Tabs>
+    );
+  }
 
   return (
-    <Tabs defaultValue={defaultTab} orientation="vertical" className="flex-1 min-h-0 gap-0">
-      {/* Left nav */}
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => setUrlTab(value)}
+      orientation="vertical"
+      className="flex-1 min-h-0 gap-0"
+    >
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
+        <h1 className="mb-4 px-2 text-sm font-semibold">Settings</h1>
         <TabsList variant="line" className="flex-col items-stretch">
-          {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
             My Account
           </span>
@@ -52,8 +192,7 @@ export default function SettingsPage() {
             </TabsTrigger>
           ))}
 
-          {/* Workspace group */}
-          <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
+          <span className="truncate px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
             {workspaceName ?? "Workspace"}
           </span>
           {workspaceTabs.map((tab) => (
@@ -65,16 +204,9 @@ export default function SettingsPage() {
         </TabsList>
       </div>
 
-      {/* Right content */}
       <div className="flex-1 min-w-0 overflow-y-auto">
-        <div className="w-full max-w-3xl mx-auto p-6">
-          <TabsContent value="profile"><AccountTab /></TabsContent>
-          <TabsContent value="appearance"><AppearanceTab /></TabsContent>
-          <TabsContent value="tokens"><TokensTab /></TabsContent>
-          <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
-          <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-          <TabsContent value="ideas"><IdeaOSTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
+        <div className="mx-auto w-full max-w-3xl p-6">
+          <SettingsContent />
         </div>
       </div>
     </Tabs>
