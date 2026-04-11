@@ -218,6 +218,23 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	}
 }
 
+func TestBuildEnvOverridesExistingValue(t *testing.T) {
+	t.Setenv("CODEX_HOME", "/tmp/original")
+
+	env := buildEnv(map[string]string{"CODEX_HOME": "/tmp/override"})
+	found := 0
+	for _, entry := range env {
+		if entry == "CODEX_HOME=/tmp/override" {
+			found++
+		}
+		if entry == "CODEX_HOME=/tmp/original" {
+			t.Fatalf("found stale env override: %q", entry)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("expected exactly one override entry, found %d", found)
+	}
+}
 
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()

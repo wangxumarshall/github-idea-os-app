@@ -27,6 +27,17 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsTraeBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("trae", Config{ExecutablePath: "/nonexistent/trae-cli"})
+	if err != nil {
+		t.Fatalf("New(trae) error: %v", err)
+	}
+	if _, ok := b.(*traeBackend); !ok {
+		t.Fatalf("expected *traeBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})

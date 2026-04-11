@@ -107,7 +107,7 @@ export const en: LandingDict = {
         {
           title: "Auto-detection & plug-and-play",
           description:
-            "Multica detects available CLIs like Claude Code and Codex automatically. Connect a machine, and it\u2019s ready to work.",
+            "Multica detects available CLIs like Claude Code, Codex, and Trae automatically. Connect a machine, and it\u2019s ready to work.",
         },
       ],
     },
@@ -126,7 +126,7 @@ export const en: LandingDict = {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica login to authenticate, then multica daemon start. The daemon auto-detects Claude Code and Codex on your machine \u2014 plug in and go.",
+          "Run multica login to authenticate, then multica daemon start. The daemon auto-detects Claude Code, Codex, and Trae on your machine \u2014 plug in and go.",
       },
       {
         title: "Create your first agent",
@@ -181,7 +181,7 @@ export const en: LandingDict = {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica currently supports Claude Code and OpenAI Codex out of the box. The daemon auto-detects whichever CLIs you have installed. More backends are on the roadmap \u2014 and since it\u2019s open source, you can add your own.",
+          "Multica currently supports Claude Code, OpenAI Codex, and Trae out of the box. The daemon auto-detects whichever CLIs you have installed. More backends are on the roadmap \u2014 and since it\u2019s open source, you can add your own.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -357,7 +357,7 @@ export const en: LandingDict = {
         changes: [
           "Multi-workspace switching and creation",
           "Agent management UI with skills, tools, and triggers",
-          "Unified agent SDK supporting Claude Code and Codex backends",
+          "Unified agent SDK supporting Claude Code, Codex, and Trae backends",
           "Comment CRUD with real-time WebSocket updates",
           "Task service layer and daemon REST protocol",
           "Event bus with workspace-scoped WebSocket isolation",

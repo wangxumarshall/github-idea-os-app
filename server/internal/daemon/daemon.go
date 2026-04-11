@@ -486,8 +486,16 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 		return
 	}
 
+	agentEnv := map[string]string{}
+	if rt.Provider == "trae" {
+		if cfg := execenv.ResolveSharedTraeConfigFile(); cfg != "" {
+			agentEnv["TRAE_CONFIG_FILE"] = cfg
+		}
+	}
+
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
+		Env:            agentEnv,
 		Logger:         d.logger,
 	})
 	if err != nil {
@@ -628,7 +636,7 @@ func (d *Daemon) triggerRestart() {
 }
 
 func (d *Daemon) usageScanLoop(ctx context.Context) {
-	scanner := usage.NewScanner(d.logger)
+	scanner := usage.NewScanner(d.logger, d.cfg.WorkspacesRoot)
 
 	report := func() {
 		records := scanner.Scan()
@@ -961,6 +969,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	if env.TraeConfigFile != "" {
+		agentEnv["TRAE_CONFIG_FILE"] = env.TraeConfigFile
+	}
+	if env.TraeTrajectoryFile != "" {
+		agentEnv["MULTICA_TRAE_TRAJECTORY_FILE"] = env.TraeTrajectoryFile
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,

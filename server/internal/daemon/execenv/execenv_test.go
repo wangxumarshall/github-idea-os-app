@@ -564,6 +564,66 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesTraeSkillsFallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "trae-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "trae", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read Trae skill file: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("Trae SKILL.md missing content")
+	}
+}
+
+func TestInjectRuntimeConfigTrae(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "trae", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"Multica Runtime",
+		".agent_context/skills/",
+		"Coding",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing %q", want)
+		}
+	}
+}
+
 func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -723,6 +783,38 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 			names[i] = e.Name()
 		}
 		t.Errorf("expected empty codex-home, got: %v", names)
+	}
+}
+
+func TestPrepareTraeHomeCopiesSharedConfig(t *testing.T) {
+	sharedDir := t.TempDir()
+	sharedConfig := filepath.Join(sharedDir, "trae_config.yaml")
+	if err := os.WriteFile(sharedConfig, []byte("models:\n  default:\n    model: gpt-4o\n"), 0o644); err != nil {
+		t.Fatalf("write shared config: %v", err)
+	}
+	t.Setenv("TRAE_CONFIG_FILE", sharedConfig)
+
+	traeHome := filepath.Join(t.TempDir(), "trae-home")
+	configFile, trajectoryFile, err := prepareTraeHome(traeHome, testLogger())
+	if err != nil {
+		t.Fatalf("prepareTraeHome failed: %v", err)
+	}
+
+	if configFile == "" {
+		t.Fatal("expected non-empty config file path")
+	}
+	if filepath.Base(configFile) != "trae_config.yaml" {
+		t.Fatalf("unexpected config file path: %s", configFile)
+	}
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatalf("read copied config: %v", err)
+	}
+	if !strings.Contains(string(data), "gpt-4o") {
+		t.Fatalf("copied config missing content: %s", string(data))
+	}
+	if want := filepath.Join(traeHome, "trajectory.json"); trajectoryFile != want {
+		t.Fatalf("trajectoryFile = %q, want %q", trajectoryFile, want)
 	}
 }
 

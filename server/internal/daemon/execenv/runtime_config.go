@@ -13,13 +13,14 @@ import (
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
+// For Trae:     writes {workDir}/AGENTS.md  (skills referenced via .agent_context/skills/)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "opencode":
+	case "codex", "opencode", "trae":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	default:
 		// Unknown provider — skip config injection, prompt-only mode.
@@ -188,6 +189,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		switch provider {
 		case "claude", "codex", "opencode":
 			b.WriteString("These skills are installed natively for this provider:\n\n")
+		case "trae":
+			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each skill directory contains a `SKILL.md` file.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}

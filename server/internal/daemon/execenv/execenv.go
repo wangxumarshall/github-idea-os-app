@@ -63,6 +63,10 @@ type Environment struct {
 	WorkDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// TraeConfigFile points to the per-task Trae config file when the provider is Trae.
+	TraeConfigFile string
+	// TraeTrajectoryFile points to the per-task Trae trajectory file.
+	TraeTrajectoryFile string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -122,6 +126,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}
 		env.CodexHome = codexHome
 	}
+	if params.Provider == "trae" {
+		traeHome := filepath.Join(envRoot, "trae-home")
+		traeConfigFile, trajectoryFile, err := prepareTraeHome(traeHome, logger)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare trae-home: %w", err)
+		}
+		env.TraeConfigFile = traeConfigFile
+		env.TraeTrajectoryFile = trajectoryFile
+	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
 	return env, nil
@@ -138,6 +151,30 @@ func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger
 		RootDir: filepath.Dir(workDir),
 		WorkDir: workDir,
 		logger:  logger,
+	}
+
+	switch provider {
+	case "codex":
+		codexHome := filepath.Join(env.RootDir, "codex-home")
+		if err := prepareCodexHome(codexHome, logger); err != nil {
+			logger.Warn("execenv: refresh codex-home failed", "error", err)
+		} else {
+			if len(task.AgentSkills) > 0 {
+				if err := writeSkillFiles(filepath.Join(codexHome, "skills"), task.AgentSkills); err != nil {
+					logger.Warn("execenv: refresh codex skills failed", "error", err)
+				}
+			}
+			env.CodexHome = codexHome
+		}
+	case "trae":
+		traeHome := filepath.Join(env.RootDir, "trae-home")
+		traeConfigFile, trajectoryFile, err := prepareTraeHome(traeHome, logger)
+		if err != nil {
+			logger.Warn("execenv: refresh trae-home failed", "error", err)
+		} else {
+			env.TraeConfigFile = traeConfigFile
+			env.TraeTrajectoryFile = trajectoryFile
+		}
 	}
 
 	// Refresh context files (issue_context.md, skills).

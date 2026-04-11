@@ -30,7 +30,7 @@ type Config struct {
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // "claude" -> entry, "codex" -> entry, "opencode" -> entry
+	Agents             map[string]AgentEntry // "claude" -> entry, "codex" -> entry, "opencode" -> entry, "trae" -> entry
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
@@ -92,8 +92,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
 		}
 	}
+	traePath := envOrDefault("MULTICA_TRAE_PATH", "trae-cli")
+	if _, err := exec.LookPath(traePath); err == nil {
+		agents["trae"] = AgentEntry{
+			Path:  traePath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_TRAE_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, or opencode and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, or trae-cli and ensure it is on PATH")
 	}
 
 	// Host info

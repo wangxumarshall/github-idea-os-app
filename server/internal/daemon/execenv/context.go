@@ -14,6 +14,7 @@ import (
 // Claude:   skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
 // Codex:    skills → handled separately in Prepare via codex-home
 // OpenCode: skills → {workDir}/.config/opencode/skills/{name}/SKILL.md  (native discovery)
+// Trae:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")

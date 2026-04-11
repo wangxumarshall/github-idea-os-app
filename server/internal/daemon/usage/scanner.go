@@ -7,7 +7,7 @@ import (
 // Record represents aggregated token usage for one (date, provider, model) tuple.
 type Record struct {
 	Date             string `json:"date"`     // "2006-01-02"
-	Provider         string `json:"provider"` // "claude" or "codex"
+	Provider         string `json:"provider"` // "claude", "codex", or "trae"
 	Model            string `json:"model"`
 	InputTokens      int64  `json:"input_tokens"`
 	OutputTokens     int64  `json:"output_tokens"`
@@ -17,15 +17,16 @@ type Record struct {
 
 // Scanner scans local CLI log files for token usage data.
 type Scanner struct {
-	logger *slog.Logger
+	logger         *slog.Logger
+	workspaceRoots []string
 }
 
 // NewScanner creates a new usage scanner.
-func NewScanner(logger *slog.Logger) *Scanner {
-	return &Scanner{logger: logger}
+func NewScanner(logger *slog.Logger, workspaceRoots ...string) *Scanner {
+	return &Scanner{logger: logger, workspaceRoots: workspaceRoots}
 }
 
-// Scan reads local JSONL log files for both Claude Code and Codex CLI,
+// Scan reads local usage artifacts for Claude Code, Codex, and Trae,
 // and returns aggregated usage records keyed by (date, provider, model).
 func (s *Scanner) Scan() []Record {
 	var records []Record
@@ -35,6 +36,9 @@ func (s *Scanner) Scan() []Record {
 
 	codexRecords := s.scanCodex()
 	records = append(records, codexRecords...)
+
+	traeRecords := s.scanTrae()
+	records = append(records, traeRecords...)
 
 	return records
 }

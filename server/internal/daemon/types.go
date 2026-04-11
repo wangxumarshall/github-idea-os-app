@@ -36,7 +36,7 @@ type Task struct {
 	IdeaSlug                string     `json:"idea_slug,omitempty"`
 	IdeaCode                string     `json:"idea_code,omitempty"`
 	IdeaTitle               string     `json:"idea_title,omitempty"`
-	PriorSessionID          string     `json:"prior_session_id,omitempty"`   // Claude session ID from a previous task on this issue
+	PriorSessionID          string     `json:"prior_session_id,omitempty"`   // provider session ID from a previous task on this issue
 	PriorWorkDir            string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
 	TriggerCommentID        string     `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 }
@@ -76,6 +76,6 @@ type TaskResult struct {
 	PlanRequiresDecision bool     `json:"plan_requires_decision,omitempty"`
 	PlanQuestions        []string `json:"plan_questions,omitempty"`
 	EnvType              string   `json:"env_type,omitempty"`
-	SessionID            string   `json:"session_id,omitempty"` // Claude session ID for future resumption
+	SessionID            string   `json:"session_id,omitempty"` // provider session ID for future resumption
 	WorkDir              string   `json:"work_dir,omitempty"`   // working directory used during execution
 }
