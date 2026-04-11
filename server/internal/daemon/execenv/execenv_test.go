@@ -377,12 +377,13 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 
 	s := string(content)
 	for _, want := range []string{
-		"Multica Agent Runtime",
+		"Multica Runtime",
+		"## Multica CLI",
 		"multica issue get",
 		"multica issue comment list",
 		"Go Conventions",
 		"PR Review",
-		"discovered automatically",
+		"installed natively",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
@@ -409,11 +410,14 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
+	if !strings.Contains(s, "Multica Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "## Execution Rules") {
+		t.Error("AGENTS.md missing execution rules section")
 	}
 }
 
@@ -436,7 +440,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	if !strings.Contains(s, "multica issue get") {
 		t.Error("should reference multica CLI even without skills")
 	}
-	if strings.Contains(s, "## Skills") {
+	if strings.Contains(s, "## Installed Skills") {
 		t.Error("should not have Skills section when there are no skills")
 	}
 }
@@ -544,13 +548,13 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
+	if !strings.Contains(s, "Multica Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
-	if !strings.Contains(s, "discovered automatically") {
+	if !strings.Contains(s, "installed natively") {
 		t.Error("AGENTS.md missing native skill discovery hint")
 	}
 

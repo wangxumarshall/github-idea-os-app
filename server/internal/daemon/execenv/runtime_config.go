@@ -32,19 +32,21 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
-	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("# Multica Runtime\n\n")
+	b.WriteString("You are running inside a task-scoped Multica workdir.\n\n")
 
 	// Inject agent identity instructions before workflow commands.
-	if ctx.AgentInstructions != "" {
+	if strings.TrimSpace(ctx.AgentInstructions) != "" {
 		b.WriteString("## Agent Identity\n\n")
 		b.WriteString(ctx.AgentInstructions)
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("## Available Commands\n\n")
-	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
-	b.WriteString("### Read\n")
+	b.WriteString("## Multica CLI\n\n")
+	b.WriteString("Use the `multica` CLI for all Multica data and actions. Do not use `curl`, `wget`, or direct HTTP calls against Multica URLs.\n\n")
+	b.WriteString("Always use `--output json` on read commands.\n\n")
+
+	b.WriteString("### Read Commands\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
 	b.WriteString("- `multica idea get <slug> --output json` — Get full idea details when an issue belongs to an idea\n")
 	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] --output json` — List issues in workspace\n")
@@ -55,7 +57,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run (supports incremental fetch)\n")
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n\n")
 
-	b.WriteString("### Write\n")
+	b.WriteString("### Write Commands\n")
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
@@ -63,8 +65,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {
 		b.WriteString("## Repositories\n\n")
-		b.WriteString("The following code repositories are available for this task.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
+		b.WriteString("Use `multica repo checkout <url>` to create a task-scoped worktree for a repository.\n\n")
 		if ctx.SelectedRepoURL != "" {
 			b.WriteString("**Preferred repository for this issue**\n\n")
 			fmt.Fprintf(&b, "- URL: %s\n", ctx.SelectedRepoURL)
@@ -85,72 +86,78 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 			b.WriteString("\n")
 		}
-		b.WriteString("The checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+		b.WriteString("The checkout command creates a dedicated git worktree and branch for this task.\n\n")
 	}
 
-	b.WriteString("### Workflow\n\n")
+	b.WriteString("## Execution Rules\n\n")
 
 	mode := strings.TrimSpace(ctx.Mode)
 	if mode == "plan" {
-		b.WriteString("You are in native planning mode. Your job is to understand the issue deeply and produce a concrete implementation plan.\n\n")
-		b.WriteString("Hard constraints:\n")
+		step := 1
+		b.WriteString("You are in plan mode. Produce a concrete implementation plan without making code changes.\n\n")
+		b.WriteString("Non-negotiable:\n")
 		b.WriteString("- Do NOT edit files\n")
 		b.WriteString("- Do NOT commit or push code\n")
 		b.WriteString("- Do NOT create or request a PR\n")
-		b.WriteString("- Do NOT change issue status just because planning is complete\n")
+		b.WriteString("- Do NOT change issue status just because the plan is done\n")
 		b.WriteString("- Do NOT mark the issue blocked unless you hit a real blocker that prevents planning\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue\n", ctx.IssueID)
+		fmt.Fprintf(&b, "%d. Run `multica issue get %s --output json`\n", step, ctx.IssueID)
+		step++
 		if ctx.IdeaSlug != "" {
-			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", ctx.IdeaSlug)
-			fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the discussion\n", ctx.IssueID)
-		} else {
-			fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the discussion\n", ctx.IssueID)
+			fmt.Fprintf(&b, "%d. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", step, ctx.IdeaSlug)
+			step++
 		}
-		b.WriteString("   - Use pagination when needed to focus on the latest instructions\n")
+		fmt.Fprintf(&b, "%d. Run `multica issue comment list %s --output json`\n", step, ctx.IssueID)
+		step++
 		if ctx.TriggerCommentID != "" {
-			fmt.Fprintf(&b, "4. Pay special attention to the triggering comment (ID: `%s`) and treat it as feedback on the previous draft plan\n", ctx.TriggerCommentID)
-			b.WriteString("   - Revise the plan instead of switching into implementation\n")
+			fmt.Fprintf(&b, "%d. Revise the previous plan using the triggering comment (ID: `%s`) as feedback\n", step, ctx.TriggerCommentID)
+			step++
+			fmt.Fprintf(&b, "%d. Stay in planning mode instead of switching into implementation\n", step)
 		} else {
-			b.WriteString("4. Identify implementation scope, affected files/modules, sequencing, risks, and acceptance checks\n")
+			fmt.Fprintf(&b, "%d. Identify scope, affected areas, sequencing, risks, and acceptance checks\n", step)
 		}
-		b.WriteString("5. If a repository is relevant, inspect its current structure only as needed to produce a grounded plan\n")
-		b.WriteString("6. Return a final response that is ready for human confirmation, including:\n")
-		b.WriteString("   - goal summary\n")
-		b.WriteString("   - implementation steps\n")
-		b.WriteString("   - risks or open questions\n")
-		b.WriteString("   - validation approach\n\n")
-		b.WriteString("End with explicit prompts for any decisions that still need user confirmation.\n\n")
+		step++
+		fmt.Fprintf(&b, "%d. Inspect the repository only as much as needed to ground the plan\n", step)
+		step++
+		fmt.Fprintf(&b, "%d. Return a review-ready plan with goal summary, implementation steps, risks or open questions, and validation approach\n\n", step)
 	} else if ctx.TriggerCommentID != "" {
-		// Comment-triggered build-mode: focus on requested follow-up work and reply.
-		b.WriteString("**This build task was triggered by a comment.** Your primary job is to address the request and reply with the result.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		step := 1
+		b.WriteString("This build task was triggered by a comment. Address the requested follow-up and reply with the result when useful.\n\n")
+		fmt.Fprintf(&b, "%d. Run `multica issue get %s --output json`\n", step, ctx.IssueID)
+		step++
 		if ctx.IdeaSlug != "" {
-			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` to load the full idea context\n", ctx.IdeaSlug)
-			fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
-		} else {
-			fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+			fmt.Fprintf(&b, "%d. Run `multica idea get %s --output json`\n", step, ctx.IdeaSlug)
+			step++
 		}
-		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` or `--since <timestamp>`\n")
-		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) and address what is being asked\n", ctx.TriggerCommentID)
-		fmt.Fprintf(&b, "5. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("6. If code changes are needed, implement them, commit, and push the branch\n")
-		b.WriteString("7. The server handles PR creation after review; lack of immediate PR visibility is not a blocker\n")
-		fmt.Fprintf(&b, "8. When delivery artifacts are ready, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "9. Reply in-thread only if useful for the human conversation: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
-		fmt.Fprintf(&b, "10. Only run `multica issue status %s blocked` for real implementation blockers\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "%d. Run `multica issue comment list %s --output json`\n", step, ctx.IssueID)
+		step++
+		fmt.Fprintf(&b, "%d. Address the triggering comment (ID: `%s`)\n", step, ctx.TriggerCommentID)
+		step++
+		fmt.Fprintf(&b, "%d. Run `multica issue status %s in_progress`\n", step, ctx.IssueID)
+		step++
+		fmt.Fprintf(&b, "%d. If code changes are needed, check out the allowed repository if required, then implement, commit, and push the branch\n", step)
+		step++
+		fmt.Fprintf(&b, "%d. Do not treat delayed PR visibility as a blocker; server-side PR automation may still be running\n", step)
+		step++
+		fmt.Fprintf(&b, "%d. When delivery artifacts are ready, run `multica issue status %s in_review`\n", step, ctx.IssueID)
+		step++
+		fmt.Fprintf(&b, "%d. Reply in-thread only if useful: `multica issue comment add %s --parent %s --content \"...\"`\n", step, ctx.IssueID, ctx.TriggerCommentID)
+		step++
+		fmt.Fprintf(&b, "%d. Only run `multica issue status %s blocked` for real implementation blockers\n\n", step, ctx.IssueID)
 	} else {
-		// Assignment-triggered build-mode: full implementation workflow.
-		b.WriteString("You are in build mode. Implement the confirmed plan and manage the issue toward review.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		step := 1
+		b.WriteString("You are in build mode. Implement the confirmed plan and move the issue toward review.\n\n")
+		fmt.Fprintf(&b, "%d. Run `multica issue get %s --output json`\n", step, ctx.IssueID)
+		step++
 		if ctx.IdeaSlug != "" {
-			fmt.Fprintf(&b, "2. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", ctx.IdeaSlug)
-			fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-			b.WriteString("4. Read comments for any final human instructions before coding\n")
-		} else {
-			fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-			b.WriteString("3. Read comments for any final human instructions before coding\n")
+			fmt.Fprintf(&b, "%d. Run `multica idea get %s --output json` and treat the full idea markdown as the source of truth\n", step, ctx.IdeaSlug)
+			step++
 		}
-		b.WriteString("5. If the task requires code changes:\n")
+		fmt.Fprintf(&b, "%d. Run `multica issue status %s in_progress`\n", step, ctx.IssueID)
+		step++
+		fmt.Fprintf(&b, "%d. Read comments for any final human instructions before coding\n", step)
+		step++
+		fmt.Fprintf(&b, "%d. If the task requires code changes:\n", step)
 		if len(ctx.Repos) > 0 || ctx.SelectedRepoURL != "" {
 			if ctx.SelectedRepoURL != "" {
 				fmt.Fprintf(&b, "   a. Run `multica repo checkout %s`\n", ctx.SelectedRepoURL)
@@ -167,21 +174,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("   c. Push the branch to the remote\n")
 		b.WriteString("   d. Push a review-ready branch; the server will attempt PR creation automatically after the issue moves to review\n")
 		fmt.Fprintf(&b, "   e. If you already know the PR URL, post it as a comment: `multica issue comment add %s --content \"PR: <url>\"`\n", ctx.IssueID)
-		b.WriteString("   f. If no PR is visible yet, do not treat that alone as a blocker — the server-side PR automation may still be running\n")
-		b.WriteString("6. If the task does not require code (e.g. research, documentation), post your findings as a comment\n")
-		fmt.Fprintf(&b, "7. When delivery artifacts are ready, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "8. Only run `multica issue status %s blocked` for real implementation blockers; lack of immediate PR creation is not by itself a blocker\n\n", ctx.IssueID)
+		b.WriteString("   f. If no PR is visible yet, do not treat that alone as a blocker\n")
+		step++
+		fmt.Fprintf(&b, "%d. If the task does not require code (e.g. research, documentation), post your findings as a comment\n", step)
+		step++
+		fmt.Fprintf(&b, "%d. When delivery artifacts are ready, run `multica issue status %s in_review`\n", step, ctx.IssueID)
+		step++
+		fmt.Fprintf(&b, "%d. Only run `multica issue status %s blocked` for real implementation blockers\n\n", step, ctx.IssueID)
 	}
 
 	if len(ctx.AgentSkills) > 0 {
-		b.WriteString("## Skills\n\n")
+		b.WriteString("## Installed Skills\n\n")
 		switch provider {
-		case "claude":
-			// Claude discovers skills natively from .claude/skills/ — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "opencode":
-			// Codex and OpenCode discover skills natively from their respective paths — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+		case "claude", "codex", "opencode":
+			b.WriteString("These skills are installed natively for this provider:\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}
@@ -205,14 +211,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
 	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
 
-	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
-	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
-	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
-	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
-	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
+	b.WriteString("## Missing Capabilities\n\n")
+	b.WriteString("If the `multica` CLI cannot perform a required platform action, do not work around it. Post a comment mentioning the workspace owner instead.\n\n")
 
-	b.WriteString("## Output\n\n")
+	b.WriteString("## Delivery Style\n\n")
 	b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 	b.WriteString("Good: \"Delivery ready. PR: https://...\"\n")
 	b.WriteString("Good: \"Delivery ready. Branch pushed; PR automation should pick this up. Compare: https://...\"\n")
