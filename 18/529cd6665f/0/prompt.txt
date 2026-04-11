@@ -1,0 +1,5 @@
+深度理解理解当前trigger前后段的语，重新设计最优的解决方案，且不能与当前ideas创建/root-issue创建触发执行的逻辑冲突，且“on comment”也不能与agent的plan mode冲突，且下发root issue、issue和comment时，支持agent的“on Scheduled”。 最核心的总体要求是，解决上述bug的基础上，重复理解当前idea-issue-comment的实现逻辑，不能有任何逻辑的矛盾。
+
+---
+
+深度理解理解当前trigger前后段的语，重新设计最优的解决方案，且不能与当前ideas创建/root-issue创建触发执行的逻辑冲突，且“on comment”也不能与agent的plan mode冲突，且下发root issue、issue和comment时，支持agent的“on Scheduled”。 最核心的总体要求是，解决上述bug的基础上，重复理解当前idea-issue-comment的实现逻辑，不能有任何逻辑的矛盾。

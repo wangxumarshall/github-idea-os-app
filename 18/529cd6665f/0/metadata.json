@@ -1,0 +1,73 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "18529cd6665f",
+  "session_id": "019d7bd8-d903-78e1-a3a6-e3854e2f1991",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-11T10:43:02.82512361Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "apps/web/app/(dashboard)/agents/page.tsx",
+    "apps/web/app/(dashboard)/settings/page.test.tsx",
+    "apps/web/app/(dashboard)/settings/page.tsx",
+    "apps/web/features/runtimes/components/runtime-detail.tsx",
+    "apps/web/features/runtimes/components/runtime-list.tsx",
+    "apps/web/features/runtimes/components/runtimes-page.tsx",
+    "apps/web/features/skills/components/skills-page.tsx",
+    "apps/web/shared/hooks/use-query-param-selection.test.tsx",
+    "apps/web/shared/hooks/use-query-param-selection.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.4",
+  "turn_id": "a2f1401e82c5",
+  "token_usage": {
+    "input_tokens": 18174721,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16684160,
+    "output_tokens": 120018,
+    "api_call_count": 215
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-11T10:42:59.513434976Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 323,
+    "total_committed": 0,
+    "total_lines_changed": 323,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 933,
+      "user_lines_removed": 323,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "apps/web/app/(dashboard)/agents/page.tsx": 137,
+        "apps/web/app/(dashboard)/settings/page.test.tsx": 96,
+        "apps/web/app/(dashboard)/settings/page.tsx": 155,
+        "apps/web/features/runtimes/components/runtime-detail.tsx": 24,
+        "apps/web/features/runtimes/components/runtime-list.tsx": 3,
+        "apps/web/features/runtimes/components/runtimes-page.tsx": 59,
+        "apps/web/features/skills/components/skills-page.tsx": 329,
+        "apps/web/shared/hooks/use-query-param-selection.test.tsx": 84,
+        "apps/web/shared/hooks/use-query-param-selection.ts": 46
+      },
+      "user_removed_per_file": {
+        "apps/web/app/(dashboard)/agents/page.tsx": 105,
+        "apps/web/app/(dashboard)/settings/page.tsx": 23,
+        "apps/web/features/runtimes/components/runtime-detail.tsx": 5,
+        "apps/web/features/runtimes/components/runtime-list.tsx": 1,
+        "apps/web/features/runtimes/components/runtimes-page.tsx": 9,
+        "apps/web/features/skills/components/skills-page.tsx": 180
+      }
+    }
+  ]
+}

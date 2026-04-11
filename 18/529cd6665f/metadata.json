@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "18529cd6665f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "apps/web/app/(dashboard)/agents/page.tsx",
+    "apps/web/app/(dashboard)/settings/page.test.tsx",
+    "apps/web/app/(dashboard)/settings/page.tsx",
+    "apps/web/features/runtimes/components/runtime-detail.tsx",
+    "apps/web/features/runtimes/components/runtime-list.tsx",
+    "apps/web/features/runtimes/components/runtimes-page.tsx",
+    "apps/web/features/skills/components/skills-page.tsx",
+    "apps/web/shared/hooks/use-query-param-selection.test.tsx",
+    "apps/web/shared/hooks/use-query-param-selection.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/18/529cd6665f/0/metadata.json",
+      "transcript": "/18/529cd6665f/0/full.jsonl",
+      "content_hash": "/18/529cd6665f/0/content_hash.txt",
+      "prompt": "/18/529cd6665f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 18174721,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16684160,
+    "output_tokens": 120018,
+    "api_call_count": 215
+  }
+}
