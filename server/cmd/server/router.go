@@ -84,6 +84,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/password-login", h.PasswordLogin)
 	r.Get("/auth/github/callback", h.GitHubOAuthCallback)
+	r.Get("/api/admin/ssh-sessions/{sessionId}/ws", h.AdminSSHWebSocket)
 
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -152,6 +153,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireSuperAdmin(queries))
+			r.Post("/api/admin/runtimes/{runtimeId}/ssh-sessions", h.CreateAdminSSHSession)
+			r.Get("/api/admin/ssh-sessions/{sessionId}", h.GetAdminSSHSession)
+			r.Delete("/api/admin/ssh-sessions/{sessionId}", h.DeleteAdminSSHSession)
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---

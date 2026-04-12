@@ -21,22 +21,24 @@ import (
 )
 
 type UserResponse struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Email     string  `json:"email"`
-	AvatarURL *string `json:"avatar_url"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Email        string  `json:"email"`
+	AvatarURL    *string `json:"avatar_url"`
+	IsSuperAdmin bool    `json:"is_super_admin"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
 func userToResponse(u db.User) UserResponse {
 	return UserResponse{
-		ID:        uuidToString(u.ID),
-		Name:      u.Name,
-		Email:     u.Email,
-		AvatarURL: textToPtr(u.AvatarUrl),
-		CreatedAt: timestampToString(u.CreatedAt),
-		UpdatedAt: timestampToString(u.UpdatedAt),
+		ID:           uuidToString(u.ID),
+		Name:         u.Name,
+		Email:        u.Email,
+		AvatarURL:    textToPtr(u.AvatarUrl),
+		IsSuperAdmin: auth.IsSuperAdminEmail(u.Email),
+		CreatedAt:    timestampToString(u.CreatedAt),
+		UpdatedAt:    timestampToString(u.UpdatedAt),
 	}
 }
 
@@ -60,11 +62,11 @@ type PasswordLoginRequest struct {
 }
 
 func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	return auth.NormalizeEmail(email)
 }
 
 func configuredSuperAdminCredentials() (string, string) {
-	return normalizeEmail(os.Getenv("SUPER_ADMIN_EMAIL")), os.Getenv("SUPER_ADMIN_PASSWORD")
+	return auth.SuperAdminEmail(), os.Getenv("SUPER_ADMIN_PASSWORD")
 }
 
 func defaultWorkspaceName(user db.User) string {
@@ -207,11 +209,12 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, user db.
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":   uuidToString(user.ID),
-		"email": user.Email,
-		"name":  user.Name,
-		"exp":   time.Now().Add(72 * time.Hour).Unix(),
-		"iat":   time.Now().Unix(),
+		"sub":         uuidToString(user.ID),
+		"email":       user.Email,
+		"name":        user.Name,
+		"super_admin": auth.IsSuperAdminEmail(user.Email),
+		"exp":         time.Now().Add(72 * time.Hour).Unix(),
+		"iat":         time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
 }

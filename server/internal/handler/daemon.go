@@ -15,6 +15,17 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+func mergeRuntimeMetadata(existing []byte, version, cliVersion string) []byte {
+	merged := map[string]any{}
+	if len(existing) > 0 {
+		_ = json.Unmarshal(existing, &merged)
+	}
+	merged["version"] = version
+	merged["cli_version"] = cliVersion
+	data, _ := json.Marshal(merged)
+	return data
+}
+
 // ---------------------------------------------------------------------------
 // Daemon Registration & Heartbeat
 // ---------------------------------------------------------------------------
@@ -67,6 +78,23 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existingRuntimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(req.WorkspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load existing runtimes")
+		return
+	}
+
+	existingByProvider := make(map[string]db.AgentRuntime, len(existingRuntimes))
+	for _, rt := range existingRuntimes {
+		if strings.TrimSpace(rt.Provider) == "" {
+			continue
+		}
+		if !rt.DaemonID.Valid || strings.TrimSpace(rt.DaemonID.String) != req.DaemonID {
+			continue
+		}
+		existingByProvider[rt.Provider] = rt
+	}
+
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
 		provider := strings.TrimSpace(runtime.Type)
@@ -90,10 +118,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
-		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-		})
+		existingMetadata := []byte(nil)
+		if existing, ok := existingByProvider[provider]; ok {
+			existingMetadata = existing.Metadata
+		}
+		metadata := mergeRuntimeMetadata(existingMetadata, runtime.Version, req.CLIVersion)
 
 		registered, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: parseUUID(req.WorkspaceID),

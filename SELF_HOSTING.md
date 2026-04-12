@@ -77,6 +77,24 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
+### Super Admin SSH Terminal (Optional)
+
+These variables are required only if you want the super-admin web SSH terminal.
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `SUPER_ADMIN_EMAIL` | Email allowed to use the super-admin login and SSH terminal | `admin@example.com` |
+| `SUPER_ADMIN_PASSWORD` | Password for the super-admin login tab | `use-a-long-random-password` |
+| `SUPER_ADMIN_SSH_KEY_PATH` | Absolute path to the private key the server will use for SSH | `/etc/multica/admin_ssh_key` |
+| `SUPER_ADMIN_SSH_KNOWN_HOSTS_PATH` | Absolute path to the `known_hosts` file used for strict host verification | `/etc/multica/admin_known_hosts` |
+
+Runtime SSH access is driven by `agent_runtime.metadata`. For each runtime you want to expose in the web terminal, set:
+
+- `ssh_enabled: true`
+- `ssh_host: "<hostname or IP>"`
+- `ssh_port: 22`
+- `ssh_user: "<remote user>"`
+
 ### Google OAuth (Optional)
 
 | Variable | Description |

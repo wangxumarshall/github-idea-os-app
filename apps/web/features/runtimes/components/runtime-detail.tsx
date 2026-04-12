@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { formatLastSeen } from "../utils";
 import { RuntimeModeIcon, StatusBadge, InfoField } from "./shared";
 import { PingSection } from "./ping-section";
+import { RuntimeSshTerminal } from "./runtime-ssh-terminal";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 
@@ -98,6 +99,8 @@ export function RuntimeDetail({
           </h3>
           <PingSection runtimeId={runtime.id} />
         </div>
+
+        <RuntimeSshTerminal runtime={runtime} />
 
         {/* Usage */}
         <div>

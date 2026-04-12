@@ -212,3 +212,27 @@ export interface RuntimeUpdate {
   created_at: string;
   updated_at: string;
 }
+
+export type AdminSshSessionStatus =
+  | "connected"
+  | "closed"
+  | "exited";
+
+export interface AdminSshSession {
+  id: string;
+  runtime_id: string;
+  runtime_name: string;
+  status: AdminSshSessionStatus;
+  can_reconnect: boolean;
+  host: string;
+  port: number;
+  user: string;
+  tmux_session: string;
+  websocket_path: string;
+  created_at: string;
+  updated_at: string;
+  last_active_at: string;
+  exited_at?: string | null;
+  exit_code?: number | null;
+  exit_error?: string | null;
+}

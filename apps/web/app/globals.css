@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@xterm/xterm/css/xterm.css";
 @import "./custom.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -143,6 +144,19 @@
     --scrollbar-thumb: oklch(1 0 0 / 8%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
     --scrollbar-track: transparent;
+}
+
+.runtime-ssh-terminal .xterm {
+    height: 100%;
+    padding: 0.85rem 0.9rem;
+}
+
+.runtime-ssh-terminal .xterm-viewport {
+    scrollbar-color: oklch(0.55 0.02 255 / 60%) transparent;
+}
+
+.runtime-ssh-terminal .xterm-screen canvas {
+    image-rendering: auto;
 }
 
 @layer base {

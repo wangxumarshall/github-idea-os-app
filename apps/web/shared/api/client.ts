@@ -32,6 +32,7 @@ import type {
   RuntimeHourlyActivity,
   RuntimePing,
   RuntimeUpdate,
+  AdminSshSession,
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
@@ -464,6 +465,22 @@ export class ApiClient {
     updateId: string,
   ): Promise<RuntimeUpdate> {
     return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+  }
+
+  async createAdminSshSession(runtimeId: string): Promise<AdminSshSession> {
+    return this.fetch(`/api/admin/runtimes/${runtimeId}/ssh-sessions`, {
+      method: "POST",
+    });
+  }
+
+  async getAdminSshSession(sessionId: string): Promise<AdminSshSession> {
+    return this.fetch(`/api/admin/ssh-sessions/${sessionId}`);
+  }
+
+  async closeAdminSshSession(sessionId: string): Promise<AdminSshSession> {
+    return this.fetch(`/api/admin/ssh-sessions/${sessionId}`, {
+      method: "DELETE",
+    });
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
