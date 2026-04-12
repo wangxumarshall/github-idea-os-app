@@ -1,3 +1,5 @@
+export const TERMINAL_SCROLLBACK_LINES = 50000;
+
 export type RuntimeSshConfig =
   | {
       enabled: true;

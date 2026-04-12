@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { adminSshSessionStorageKey, readRuntimeSSHConfig } from "./ssh";
+import {
+  adminSshSessionStorageKey,
+  readRuntimeSSHConfig,
+  TERMINAL_SCROLLBACK_LINES,
+} from "./ssh";
 
 describe("readRuntimeSSHConfig", () => {
   it("returns disabled when ssh is not enabled", () => {
@@ -49,5 +53,11 @@ describe("adminSshSessionStorageKey", () => {
     expect(adminSshSessionStorageKey("runtime-123")).toBe(
       "multica_admin_ssh_session:runtime-123",
     );
+  });
+});
+
+describe("TERMINAL_SCROLLBACK_LINES", () => {
+  it("uses an extended scrollback buffer for SSH sessions", () => {
+    expect(TERMINAL_SCROLLBACK_LINES).toBe(50000);
   });
 });
