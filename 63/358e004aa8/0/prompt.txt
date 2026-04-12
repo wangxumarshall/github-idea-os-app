@@ -67,3 +67,7 @@ Implement the plan.
 ---
 
 全屏时，“ubuntu@127.0.0.1:22 Host verification stays strict. Detached sessions expire after inactivity.”、“SSH target ubuntu@127.0.0.1”、“tmux mode multica-admin”、“Session ff2da512b59e6c88ce42b9”等默认隐藏，以给shell提供更大的展示空间
+
+---
+
+提交并push
