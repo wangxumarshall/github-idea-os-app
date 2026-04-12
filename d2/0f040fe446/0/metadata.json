@@ -1,0 +1,140 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "d20f040fe446",
+  "session_id": "019d7d67-4132-74e0-b769-201a143a51bc",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-12T00:01:19.47915474Z",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "files_touched": [
+    ".env.example",
+    "SELF_HOSTING.md",
+    "apps/web/app/globals.css",
+    "apps/web/features/runtimes/components/runtime-detail.tsx",
+    "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx",
+    "apps/web/features/runtimes/ssh.test.ts",
+    "apps/web/features/runtimes/ssh.ts",
+    "apps/web/package.json",
+    "apps/web/shared/api/client.ts",
+    "apps/web/shared/types/agent.ts",
+    "apps/web/shared/types/index.ts",
+    "apps/web/shared/types/workspace.ts",
+    "pnpm-lock.yaml",
+    "server/cmd/server/router.go",
+    "server/go.mod",
+    "server/go.sum",
+    "server/internal/auth/super_admin.go",
+    "server/internal/handler/admin_ssh.go",
+    "server/internal/handler/admin_ssh_test.go",
+    "server/internal/handler/auth.go",
+    "server/internal/handler/daemon.go",
+    "server/internal/handler/daemon_test.go",
+    "server/internal/handler/handler.go",
+    "server/internal/middleware/super_admin.go"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.4",
+  "turn_id": "8efe17c4ee7f",
+  "token_usage": {
+    "input_tokens": 28094045,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 27546880,
+    "output_tokens": 140570,
+    "api_call_count": 428
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-12T00:01:15.83748989Z",
+    "agent_lines": 2130,
+    "agent_removed": 60,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2130,
+    "total_lines_changed": 2190,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 152,
+      "user_lines_removed": 152,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "apps/web/app/(auth)/login/page.test.tsx": 2,
+        "apps/web/app/(auth)/login/page.tsx": 3,
+        "apps/web/app/(dashboard)/_components/app-sidebar.tsx": 1,
+        "apps/web/app/(landing)/about/page.tsx": 3,
+        "apps/web/app/(landing)/changelog/page.tsx": 3,
+        "apps/web/app/(landing)/homepage/page.tsx": 3,
+        "apps/web/app/(landing)/layout.tsx": 5,
+        "apps/web/app/(landing)/page.tsx": 4,
+        "apps/web/app/layout.tsx": 5,
+        "apps/web/app/robots.ts": 1,
+        "apps/web/app/sitemap.ts": 1,
+        "apps/web/features/landing/components/features-section.tsx": 4,
+        "apps/web/features/landing/components/landing-footer.tsx": 2,
+        "apps/web/features/landing/components/landing-header.tsx": 1,
+        "apps/web/features/landing/i18n/en.ts": 57,
+        "apps/web/features/landing/i18n/zh.ts": 57
+      },
+      "user_removed_per_file": {
+        "apps/web/app/(auth)/login/page.test.tsx": 2,
+        "apps/web/app/(auth)/login/page.tsx": 3,
+        "apps/web/app/(dashboard)/_components/app-sidebar.tsx": 1,
+        "apps/web/app/(landing)/about/page.tsx": 3,
+        "apps/web/app/(landing)/changelog/page.tsx": 3,
+        "apps/web/app/(landing)/homepage/page.tsx": 3,
+        "apps/web/app/(landing)/layout.tsx": 5,
+        "apps/web/app/(landing)/page.tsx": 4,
+        "apps/web/app/layout.tsx": 5,
+        "apps/web/app/robots.ts": 1,
+        "apps/web/app/sitemap.ts": 1,
+        "apps/web/features/landing/components/features-section.tsx": 4,
+        "apps/web/features/landing/components/landing-footer.tsx": 2,
+        "apps/web/features/landing/components/landing-header.tsx": 1,
+        "apps/web/features/landing/i18n/en.ts": 57,
+        "apps/web/features/landing/i18n/zh.ts": 57
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 152,
+      "agent_lines_removed": 152
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2067,
+      "agent_lines_removed": 56
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2068,
+      "agent_lines_removed": 57
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2130,
+      "agent_lines_removed": 60
+    }
+  ]
+}

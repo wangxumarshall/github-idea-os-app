@@ -1,0 +1,33 @@
+为supper admin增加远程ssh登陆的功能，在网页上，且默认支持tmux。便于管理员远程登陆
+
+---
+
+查看plan
+
+---
+
+Implement the plan.
+
+---
+
+继续
+
+---
+
+查看计划
+
+---
+
+Implement the plan.
+
+---
+
+对真实 SSH/tmux 主机做端到端联调
+
+---
+
+上线clawteam
+
+---
+
+上线clawteam.io

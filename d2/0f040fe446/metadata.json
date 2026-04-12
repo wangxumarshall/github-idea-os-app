@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "d20f040fe446",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "files_touched": [
+    ".env.example",
+    "SELF_HOSTING.md",
+    "apps/web/app/globals.css",
+    "apps/web/features/runtimes/components/runtime-detail.tsx",
+    "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx",
+    "apps/web/features/runtimes/ssh.test.ts",
+    "apps/web/features/runtimes/ssh.ts",
+    "apps/web/package.json",
+    "apps/web/shared/api/client.ts",
+    "apps/web/shared/types/agent.ts",
+    "apps/web/shared/types/index.ts",
+    "apps/web/shared/types/workspace.ts",
+    "pnpm-lock.yaml",
+    "server/cmd/server/router.go",
+    "server/go.mod",
+    "server/go.sum",
+    "server/internal/auth/super_admin.go",
+    "server/internal/handler/admin_ssh.go",
+    "server/internal/handler/admin_ssh_test.go",
+    "server/internal/handler/auth.go",
+    "server/internal/handler/daemon.go",
+    "server/internal/handler/daemon_test.go",
+    "server/internal/handler/handler.go",
+    "server/internal/middleware/super_admin.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d2/0f040fe446/0/metadata.json",
+      "transcript": "/d2/0f040fe446/0/full.jsonl",
+      "content_hash": "/d2/0f040fe446/0/content_hash.txt",
+      "prompt": "/d2/0f040fe446/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28094045,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 27546880,
+    "output_tokens": 140570,
+    "api_call_count": 428
+  }
+}
