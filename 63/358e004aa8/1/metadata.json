@@ -1,0 +1,80 @@
+{
+  "cli_version": "0.5.4",
+  "checkpoint_id": "63358e004aa8",
+  "session_id": "019d7f39-10c0-7713-b6eb-e81cf8e3dad8",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-12T02:02:17.759921222Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "apps/web/app/globals.css",
+    "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx",
+    "apps/web/features/runtimes/ssh.test.ts",
+    "apps/web/features/runtimes/ssh.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.4",
+  "turn_id": "fefcd94231d9",
+  "token_usage": {
+    "input_tokens": 358850,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 275968,
+    "output_tokens": 13030,
+    "api_call_count": 17
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-12T02:02:17.262641328Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 21,
+    "human_removed": 147,
+    "total_committed": 1,
+    "total_lines_changed": 168,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 564,
+      "user_lines_removed": 166,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "apps/web/app/globals.css": 5,
+        "apps/web/features/runtimes/components/runtime-ssh-terminal.test.tsx": 167,
+        "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx": 379,
+        "apps/web/features/runtimes/ssh.test.ts": 11,
+        "apps/web/features/runtimes/ssh.ts": 2
+      },
+      "user_removed_per_file": {
+        "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx": 165,
+        "apps/web/features/runtimes/ssh.test.ts": 1
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 2,
+      "user_lines_removed": 2,
+      "agent_lines_added": 560,
+      "agent_lines_removed": 158,
+      "user_added_per_file": {
+        "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx": 2
+      },
+      "user_removed_per_file": {
+        "apps/web/features/runtimes/components/runtime-ssh-terminal.tsx": 2
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 560,
+      "agent_lines_removed": 158
+    }
+  ]
+}

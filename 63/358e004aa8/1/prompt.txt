@@ -1,0 +1,120 @@
+撰写agenticos完整的实现方案，复用现有opencode、claudecode、codex、trae-cli等：**《agenticos方案》最终完善版（2026生产级·深度研究强化）**
+
+**方案名称**：Agenticos —— 基于 HKUDS 生态 + 现有 CLI 执行器（claudecode、opencode、codex、trae-cli）的**智能粘合剂**与可插拔、自进化 AI Agent 工业流水线
+
+**核心定位（研究驱动升级）**  
+Agenticos 继续坚持“**薄控制面 + 厚数据面**”的 Kubernetes 式哲学，不自建 AgentOS，而是精准胶合 HKUDS 四大成熟仓库（nanobot、ClawTeam、OpenHarness、OpenSpace），同时将 **claudecode（Claude Code）、opencode（OpenCode）、codex、trae-cli 等现有 CLI 工具** 全部作为**可热插拔外部执行器**。  
+
+本次完善基于**2026 年最新学术·产业·X 顶级观点**深度研究：  
+- **学术**：MemSkill（arXiv:2602.02474）、《Self-Evolving AI Agents 综述》（2025）、《Memory in the Age of AI Agents》——强调**可进化记忆技能（evolvable memory skills）**、体验式记忆（experiential memory）、技能库防“丰盛诅咒”（curse of abundance）的检索/选择机制、反射闭环。  
+- **产业**：LangGraph（状态图+checkpointing）、CrewAI（角色编排）、AutoGen（对话多代理）、OpenAI Agents SDK（handoff）、MCP 协议（Anthropic 标准，已成事实工具接入规范）。生产痛点：并发状态崩溃、观测性缺失、Eval-Driven 迭代缺失。  
+- **X 顶级专家**（@Aurimas_Gr、@MaryamMiradi 等）：**Evaluation-Driven Development** 是生产 Agent 唯一可靠路径；15 种多代理模式（Supervisor/Worker、Hierarchical、MapReduce、Debate 等）+ ReAct/Reflection 闭环是标配；MCP + 结构化 trace 是生产必备。  
+
+这些洞见**全部映射为具体改进**，使方案从“可运行流水线”跃升为**真正生产就绪、可持续自进化**的工业级系统。
+
+### 1. 系统核心架构：4+1 模式（职责正交，已强化学术/产业模式）
+- **入口收单层（Entrance）** —— **nanobot（原仓库完整保留）**  
+  职责：多渠道（IM/CLI/Webhook）、鉴权、任务结构化 + MCP 发现。  
+  **强化**：入口直接输出带 `eval_metrics` 的 Agenticos Protocol，支持 X 专家推荐的“先定义成功指标”。
+
+- **路由与调度层（Orchestration）** —— **ClawTeam（总大脑）**  
+  职责：Fast-path / Swarm-path 决策 + 任务拆解。  
+  **重大强化（吸收 MaryamMiradi 15 模式 + LangGraph/CrewAI 最佳实践）**：  
+  - 内置 orchestration_templates/ 支持：Supervisor/Worker（默认）、Hierarchical、MapReduce、Parallel Fan-Out、Debate（对立论证）。  
+  - 执行器路由策略（claudecode → 推理/创意；codex → 确定性修改；opencode → 多角色并行；trae-cli → 低成本兜底）现在可动态由 skill_selection.py + eval 分数调整。
+
+- **执行与运行时层（Execution）** —— **OpenHarness（唯一 MCP Client）**  
+  职责：agent loop、memory、permissions、auto-compaction、React TUI。  
+  **强化**：  
+  - 强制集成 **MCP 协议**（Anthropic 标准，已被 OpenAI 等采纳）作为所有工具调用唯一通道。  
+  - 内置 ReAct + Reflection 闭环（学术标配），支持 self-critique。  
+  - CLI 执行器适配器全部要求：streaming JSON 输出（便于 trace）、非交互模式（--yes）、沙盒 + TTL 防死锁（产业 CLI 生产共识）。
+
+- **知识与进化层（Evolution）** —— **OpenSpace**  
+  职责：Skill 抽取、修复、lineage 可视化。  
+  **重大强化（直接对标 MemSkill + Self-Evolving 综述）**：  
+  - 将 SKILL.md 升级为**可进化记忆技能（evolvable memory skills）**：span-level 而非 turn-level，支持 experiential memory（从失败 trace 提纯）。  
+  - 增加技能检索/选择机制（防 curse of abundance）：AgentPRM 式优先级 + embedding 向量索引（可选插件）。  
+  - 异步批处理 + HITL + Eval-Driven 闭环：仅高质量 trace 触发深度 Replay。
+
+- **+1 控制面（Control Plane）** —— **agenticos 主仓库（极薄自研）**  
+  仅负责：Agenticos Protocol、Router、State Proxy、Observability、三大策略（调度、技能选择、**新增 Eval-Driven 评估策略**）。
+
+### 2. Agenticos Protocol v1.1（唯一契约，已 MCP 对齐 + Eval 强化）
+```json
+{
+  "protocol_version": "1.1",
+  "trace_id": "uuid-v4",
+  "tenant_id": "org_xxx",
+  "task": { "intent": "...", "constraints": [...], "expected_artifact": "..." },
+  "context": { "short_term_memory": "...", "injected_skills": ["..."], "experiential_memory_snapshot": "..." },
+  "execution_policy": { "timeout_ms": 300000, "fallback_strategy": "terminate|retry", "is_interactive_allowed": false },
+  "state_sync": { "write_lock_strategy": "trace_isolated|kv_proxy" },
+  "eval": { "metrics": ["accuracy", "cost", "latency"], "thresholds": {...} },   // 新增：Eval-Driven 核心
+  "error": { "code": "...", "retryable": true, "trace_stack": [] }
+}
+```
+所有层必须通过 validator.py + MCP 语义校验。
+
+### 3. agenticos 主仓库目录结构（Day-1 生产就绪·已吸收最新最佳实践）
+```
+agenticos/
+├── protocol/                  # 核心契约（MCP 对齐 + Eval 字段）
+│   ├── agenticos_schema.json
+│   ├── validator.py
+│   └── models.py              # Pydantic v2 + MCP 类型
+├── core/                      # 控制面
+│   ├── router.py              # Fast/Swarm + 15 种模式决策
+│   ├── state_manager.py       # KV（SQLite WAL/Redis）+ 异步 Merge + 向量 experiential memory
+│   └── observability/         # OpenTelemetry 完整 Agent Trace（LLM/Tool/Agent 层级）
+├── adapters/                  # CLI 执行器复用区（强化 streaming + MCP）
+│   ├── exec_claudecode.py
+│   ├── exec_opencode.py
+│   ├── exec_codex.py
+│   ├── exec_trae_cli.py
+│   └── mcp_bridge/            # 统一 MCP Server 桥接
+├── strategies/                # 三大 + 一新策略
+│   ├── orchestration_templates/ # Supervisor/Worker、Hierarchical、MapReduce 等
+│   ├── skill_selection.py     # 动态路由 + 技能检索（防丰盛诅咒）
+│   ├── async_evaluation.py    # Eval-Driven 异步批处理 + HITL
+│   └── reflection_loop.py     # ReAct + Self-Critique 模板
+├── observability/             # 系统仪表盘（Token、Skill 命中率、Eval 分数、瓶颈）
+├── docs/
+│   ├── integration_guide.md   # 新 CLI/MCP 接入标准
+│   ├── compatibility-matrix.md
+│   └── patterns.md            # 15 种多代理模式映射
+├── scripts/
+│   └── launch_pipeline.sh
+└── requirements.txt
+```
+
+### 4. 演进路线图（Roadmap，已融入 Eval-Driven + Self-Evolving 最佳实践）
+- **Phase 1（MVP，2周）**：Protocol + nanobot → Fast-path → OpenHarness + 至少一个 CLI（claudecode）闭环 + 基础 trace。
+- **Phase 2（并发就绪，3周）**：ClawTeam Swarm + 全 CLI 适配器 + State Proxy + MCP 完整 + 15 种模式模板。
+- **Phase 3（自我进化，4周）**：OpenSpace MemSkill-style 可进化技能 + Eval-Driven 异步提纯 + 完整 OTel + Reflection 闭环。
+- **Phase 4（生产强化，持续）**：A2A 协议可选扩展（代理间高级通信）、分布式部署、Skill 云端社区、自动 Eval 优化循环。
+
+**总结与研究映射**  
+本次完善**100% 吸收**了 2026 年最前沿洞见：  
+- 用 **MemSkill + Self-Evolving 综述** 升级 OpenSpace 为真正“终身学习”引擎。  
+- 用 **LangGraph/CrewAI/AutoGen + MaryamMiradi 15 模式** 让 ClawTeam 成为生产级编排大脑。  
+- 用 **Aurimas_Gr Evaluation-Driven** + OTel 确保每一次执行都可测量、可迭代、可监控。  
+- 用 **MCP 协议事实标准** 让所有 CLI 执行器（claudecode 等）无缝、安全接入。  
+
+Agenticos 现在不仅是“站在巨人肩膀上”，更是**拥有学术级自进化大脑 + 产业级生产脊梁**的完整 AI Agent 生产线。  
+
+方案已完全就绪，可立即编码。如需下一刻输出：  
+- 完整 Pydantic Protocol 模型  
+- router.py + 任一 orchestration_template 示例  
+- MemSkill-style skill 进化伪代码  
+- Phase 1 launch_pipeline.sh  
+
+随时指示，我立刻交付。
+
+---
+
+批判性review上述plan
+
+---
+
+重新拟定plan
