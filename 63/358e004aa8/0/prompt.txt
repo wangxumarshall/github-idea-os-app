@@ -1,0 +1,69 @@
+为supper admin增加远程ssh登陆的功能，在网页上，且默认支持tmux。便于管理员远程登陆
+
+---
+
+查看plan
+
+---
+
+Implement the plan.
+
+---
+
+继续
+
+---
+
+查看计划
+
+---
+
+Implement the plan.
+
+---
+
+对真实 SSH/tmux 主机做端到端联调
+
+---
+
+上线clawteam
+
+---
+
+上线clawteam.io
+
+---
+
+提交代码，并push
+
+---
+
+remote shell支持全屏（在live附近），在考虑其他潜在能力
+
+---
+
+增加滚动画面的能力
+
+---
+
+Implement the plan.
+
+---
+
+每次写完代码，完成严格测试，通过后推送到clawteam.io
+
+---
+
+推送到clawteam.io
+
+---
+
+shell中，在connect状态下，打开全屏或关闭全屏，无法看到shell的输入框，无法输入命令；全屏时，要求屏幕下方拉到浏览器的下面的边缘
+
+---
+
+Implement the plan.
+
+---
+
+全屏时，“ubuntu@127.0.0.1:22 Host verification stays strict. Detached sessions expire after inactivity.”、“SSH target ubuntu@127.0.0.1”、“tmux mode multica-admin”、“Session ff2da512b59e6c88ce42b9”等默认隐藏，以给shell提供更大的展示空间
