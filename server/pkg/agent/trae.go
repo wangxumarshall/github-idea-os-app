@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -95,8 +94,8 @@ func (b *traeBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if execPath == "" {
 		execPath = "trae-cli"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("trae executable not found at %q: %w", execPath, err)
+	if err := validateExecutable(execPath, b.cfg.Sandbox); err != nil {
+		return nil, fmt.Errorf("trae executable not available: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -130,9 +129,11 @@ func (b *traeBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		args = append(args, "--max-steps", fmt.Sprintf("%d", opts.MaxTurns))
 	}
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	cmd.Dir = absWorkingDir
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd, err := buildCommand(runCtx, execPath, args, absWorkingDir, b.cfg.Env, b.cfg.Sandbox)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build trae command: %w", err)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

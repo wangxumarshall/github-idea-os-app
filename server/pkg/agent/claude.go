@@ -23,8 +23,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if execPath == "" {
 		execPath = "claude"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
+	if err := validateExecutable(execPath, b.cfg.Sandbox); err != nil {
+		return nil, fmt.Errorf("claude executable not available: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -56,11 +56,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	args = append(args, "-p", prompt)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := buildCommand(runCtx, execPath, args, opts.Cwd, b.cfg.Env, b.cfg.Sandbox)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build claude command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

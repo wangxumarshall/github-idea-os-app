@@ -92,31 +92,42 @@ type RepoData struct {
 	Description string `json:"description"`
 }
 
+type RunMemoryResponse struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
 type AgentTaskResponse struct {
-	ID                      string         `json:"id"`
-	AgentID                 string         `json:"agent_id"`
-	RuntimeID               string         `json:"runtime_id"`
-	IssueID                 string         `json:"issue_id"`
-	WorkspaceID             string         `json:"workspace_id"`
-	Status                  string         `json:"status"`
-	Mode                    string         `json:"mode"`
-	Priority                int32          `json:"priority"`
-	DispatchedAt            *string        `json:"dispatched_at"`
-	StartedAt               *string        `json:"started_at"`
-	CompletedAt             *string        `json:"completed_at"`
-	Result                  any            `json:"result"`
-	Error                   *string        `json:"error"`
-	Agent                   *TaskAgentData `json:"agent,omitempty"`
-	Repos                   []RepoData     `json:"repos,omitempty"`
-	SelectedRepoURL         string         `json:"selected_repo_url,omitempty"`
-	SelectedRepoDescription string         `json:"selected_repo_description,omitempty"`
-	IdeaSlug                string         `json:"idea_slug,omitempty"`
-	IdeaCode                string         `json:"idea_code,omitempty"`
-	IdeaTitle               string         `json:"idea_title,omitempty"`
-	CreatedAt               string         `json:"created_at"`
-	PriorSessionID          string         `json:"prior_session_id,omitempty"`   // session ID from a previous task on same issue
-	PriorWorkDir            string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
-	TriggerCommentID        *string        `json:"trigger_comment_id,omitempty"` // comment that triggered this task
+	ID                      string              `json:"id"`
+	AgentID                 string              `json:"agent_id"`
+	RuntimeID               string              `json:"runtime_id"`
+	IssueID                 string              `json:"issue_id"`
+	WorkspaceID             string              `json:"workspace_id"`
+	ParentTaskID            *string             `json:"parent_task_id,omitempty"`
+	SwarmRole               string              `json:"swarm_role,omitempty"`
+	Status                  string              `json:"status"`
+	Mode                    string              `json:"mode"`
+	Priority                int32               `json:"priority"`
+	DispatchedAt            *string             `json:"dispatched_at"`
+	StartedAt               *string             `json:"started_at"`
+	CompletedAt             *string             `json:"completed_at"`
+	Result                  any                 `json:"result"`
+	Error                   *string             `json:"error"`
+	Agent                   *TaskAgentData      `json:"agent,omitempty"`
+	Repos                   []RepoData          `json:"repos,omitempty"`
+	Memories                []RunMemoryResponse `json:"memories,omitempty"`
+	SelectedRepoURL         string              `json:"selected_repo_url,omitempty"`
+	SelectedRepoDescription string              `json:"selected_repo_description,omitempty"`
+	IdeaSlug                string              `json:"idea_slug,omitempty"`
+	IdeaCode                string              `json:"idea_code,omitempty"`
+	IdeaTitle               string              `json:"idea_title,omitempty"`
+	CreatedAt               string              `json:"created_at"`
+	PriorSessionID          string              `json:"prior_session_id,omitempty"`   // session ID from a previous task on same issue
+	PriorWorkDir            string              `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
+	TriggerCommentID        *string             `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -138,6 +149,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		AgentID:          uuidToString(t.AgentID),
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
+		SwarmRole:        t.SwarmRole,
 		Status:           t.Status,
 		Mode:             service.NormalizeTaskMode(t.Mode),
 		Priority:         t.Priority,

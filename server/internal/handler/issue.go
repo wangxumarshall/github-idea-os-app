@@ -516,6 +516,17 @@ type UpdateIssueRequest struct {
 	RepoURL      *string  `json:"repo_url"`
 }
 
+type FanOutIssueTaskRequest struct {
+	AgentID string `json:"agent_id"`
+	Mode    string `json:"mode"`
+	Role    string `json:"role"`
+}
+
+type FanOutIssueRequest struct {
+	ParentTaskID string                   `json:"parent_task_id,omitempty"`
+	Tasks        []FanOutIssueTaskRequest `json:"tasks"`
+}
+
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prevIssue, ok := h.loadIssueForUser(w, r, id)
@@ -681,6 +692,61 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// FanOutIssueTasks enqueues child tasks for the current issue under a parent task.
+// Agents typically call this through the multica CLI with X-Task-ID already set.
+func (h *Handler) FanOutIssueTasks(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	var req FanOutIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Tasks) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one task is required")
+		return
+	}
+
+	parentTaskID := strings.TrimSpace(req.ParentTaskID)
+	if parentTaskID == "" {
+		parentTaskID = strings.TrimSpace(r.Header.Get("X-Task-ID"))
+	}
+	if parentTaskID == "" {
+		writeError(w, http.StatusBadRequest, "parent_task_id is required")
+		return
+	}
+
+	specs := make([]service.FanOutTaskSpec, 0, len(req.Tasks))
+	for _, task := range req.Tasks {
+		agentID := strings.TrimSpace(task.AgentID)
+		if agentID == "" {
+			writeError(w, http.StatusBadRequest, "agent_id is required for each fan-out task")
+			return
+		}
+		specs = append(specs, service.FanOutTaskSpec{
+			AgentID: parseUUID(agentID),
+			Mode:    service.NormalizeTaskMode(task.Mode),
+			Role:    strings.TrimSpace(task.Role),
+		})
+	}
+
+	tasks, err := h.TaskService.FanOutTask(r.Context(), parseUUID(parentTaskID), issue.ID, specs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp := make([]AgentTaskResponse, len(tasks))
+	for i, task := range tasks {
+		resp[i] = taskToResponse(task)
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"tasks": resp})
 }
 
 func (h *Handler) ConfirmPlan(w http.ResponseWriter, r *http.Request) {

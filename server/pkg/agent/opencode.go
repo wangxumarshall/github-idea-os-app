@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -22,8 +21,8 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "opencode"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("opencode executable not found at %q: %w", execPath, err)
+	if err := validateExecutable(execPath, b.cfg.Sandbox); err != nil {
+		return nil, fmt.Errorf("opencode executable not available: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -52,15 +51,17 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	args = append(args, prompt)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	envMap := map[string]string{}
+	for k, v := range b.cfg.Env {
+		envMap[k] = v
 	}
-
-	env := buildEnv(b.cfg.Env)
 	// Auto-approve all tool use in daemon mode.
-	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
-	cmd.Env = env
+	envMap["OPENCODE_PERMISSION"] = `{"*":"allow"}`
+	cmd, err := buildCommand(runCtx, execPath, args, opts.Cwd, envMap, b.cfg.Sandbox)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build opencode command: %w", err)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

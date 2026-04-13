@@ -27,14 +27,17 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write issue_context.md: %w", err)
 	}
+	if err := writePolicyFile(workDir, ctx); err != nil {
+		return fmt.Errorf("write policy.json: %w", err)
+	}
 
 	if len(ctx.AgentSkills) > 0 {
-		skillsDir, err := resolveSkillsDir(workDir, provider)
-		if err != nil {
-			return fmt.Errorf("resolve skills dir: %w", err)
-		}
-		// Codex skills are written to codex-home in Prepare; skip here.
-		if provider != "codex" {
+		// Codex and Hermes skills are written to provider home dirs in Prepare; skip here.
+		if provider != "codex" && provider != "hermes" {
+			skillsDir, err := resolveSkillsDir(workDir, provider)
+			if err != nil {
+				return fmt.Errorf("resolve skills dir: %w", err)
+			}
 			if err := writeSkillFiles(skillsDir, ctx.AgentSkills); err != nil {
 				return fmt.Errorf("write skill files: %w", err)
 			}
@@ -118,6 +121,15 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("# Task Assignment\n\n")
 	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
 	fmt.Fprintf(&b, "**Execution Mode:** %s\n\n", strings.ToUpper(strings.TrimSpace(ctx.Mode)))
+	if ctx.ParentTaskID != "" || ctx.SwarmRole != "" {
+		b.WriteString("## Swarm Context\n\n")
+		if ctx.ParentTaskID != "" {
+			fmt.Fprintf(&b, "**Parent Task ID:** %s\n\n", ctx.ParentTaskID)
+		}
+		if ctx.SwarmRole != "" {
+			fmt.Fprintf(&b, "**Role:** %s\n\n", ctx.SwarmRole)
+		}
+	}
 
 	if ctx.TriggerCommentID != "" {
 		b.WriteString("**Trigger:** Comment Reply\n")
@@ -138,6 +150,27 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "- Description: %s\n", ctx.SelectedRepoDescription)
 		}
 		b.WriteString("\n")
+	}
+
+	if len(ctx.RunMemories) > 0 {
+		b.WriteString("## Recent Run Memory\n\n")
+		b.WriteString("Recent execution outcomes for this issue are available below. Use them to avoid repeating failed approaches and to preserve continuity.\n\n")
+		for _, memory := range ctx.RunMemories {
+			title := strings.TrimSpace(memory.Title)
+			if title == "" {
+				title = memory.Kind
+			}
+			fmt.Fprintf(&b, "### %s\n\n", title)
+			if memory.CreatedAt != "" {
+				fmt.Fprintf(&b, "- Created At: %s\n", memory.CreatedAt)
+			}
+			if memory.Kind != "" {
+				fmt.Fprintf(&b, "- Kind: %s\n", memory.Kind)
+			}
+			b.WriteString("\n")
+			b.WriteString(strings.TrimSpace(memory.Content))
+			b.WriteString("\n\n")
+		}
 	}
 
 	if len(ctx.AgentSkills) > 0 {

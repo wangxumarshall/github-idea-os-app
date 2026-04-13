@@ -26,6 +26,12 @@ type TaskService struct {
 	Bus     *events.Bus
 }
 
+type FanOutTaskSpec struct {
+	AgentID pgtype.UUID
+	Mode    string
+	Role    string
+}
+
 func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService {
 	return &TaskService{Queries: q, Hub: hub, Bus: bus}
 }
@@ -92,6 +98,7 @@ func (s *TaskService) EnqueueTaskForIssueInModeWithSource(ctx context.Context, i
 		Mode:             mode,
 		TriggerCommentID: commentID,
 		TriggerSource:    triggerSource,
+		SwarmRole:        "",
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -154,6 +161,7 @@ func (s *TaskService) EnqueueTaskForMentionInModeWithSource(ctx context.Context,
 		Mode:             mode,
 		TriggerCommentID: triggerCommentID,
 		TriggerSource:    triggerSource,
+		SwarmRole:        "",
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -162,6 +170,82 @@ func (s *TaskService) EnqueueTaskForMentionInModeWithSource(ctx context.Context,
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 	return task, nil
+}
+
+// FanOutTask enqueues child tasks for the same issue under a parent task.
+// Child tasks reuse the existing queue/claim model but can run in parallel
+// when they share the same parent_task_id.
+func (s *TaskService) FanOutTask(ctx context.Context, parentTaskID, issueID pgtype.UUID, specs []FanOutTaskSpec) ([]db.AgentTaskQueue, error) {
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("at least one fan-out task is required")
+	}
+
+	parentTask, err := s.Queries.GetAgentTask(ctx, parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("load parent task: %w", err)
+	}
+	if parentTask.IssueID != issueID {
+		return nil, fmt.Errorf("parent task does not belong to issue")
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("load issue: %w", err)
+	}
+
+	queued := make([]db.AgentTaskQueue, 0, len(specs))
+	seenAgents := map[string]struct{}{}
+	for _, spec := range specs {
+		agentKey := util.UUIDToString(spec.AgentID)
+		if _, exists := seenAgents[agentKey]; exists {
+			return nil, fmt.Errorf("fan-out does not allow duplicate agent_id %s in the same request", agentKey)
+		}
+		seenAgents[agentKey] = struct{}{}
+
+		mode := NormalizeTaskMode(spec.Mode)
+		agentRecord, err := s.Queries.GetAgent(ctx, spec.AgentID)
+		if err != nil {
+			return nil, fmt.Errorf("load agent: %w", err)
+		}
+		if agentRecord.ArchivedAt.Valid {
+			return nil, fmt.Errorf("agent is archived")
+		}
+		if !agentRecord.RuntimeID.Valid {
+			return nil, fmt.Errorf("agent has no runtime")
+		}
+		if err := ValidateRuntimeExecutionModeSupport(ctx, s.Queries, agentRecord.RuntimeID, mode); err != nil {
+			return nil, err
+		}
+
+		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+			AgentID:       spec.AgentID,
+			RuntimeID:     agentRecord.RuntimeID,
+			IssueID:       issue.ID,
+			Priority:      priorityToInt(issue.Priority),
+			Mode:          mode,
+			TriggerSource: TaskTriggerSourceSwarm,
+			ParentTaskID:  parentTaskID,
+			SwarmRole:     strings.TrimSpace(spec.Role),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create child task: %w", err)
+		}
+		queued = append(queued, task)
+		slog.Info("fan-out task enqueued",
+			"task_id", util.UUIDToString(task.ID),
+			"parent_task_id", util.UUIDToString(parentTaskID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(spec.AgentID),
+			"mode", mode,
+			"role", strings.TrimSpace(spec.Role),
+		)
+	}
+
+	if _, _, err := s.setIssueExecutionStage(ctx, issue, QueueStageForMode(specs[0].Mode)); err != nil {
+		slog.Warn("fan-out: failed to update execution stage", "issue_id", util.UUIDToString(issue.ID), "error", err)
+	}
+
+	return queued, nil
 }
 
 // CancelTasksForIssue cancels all active tasks for an issue.
@@ -340,6 +424,26 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 	}
 
+	runSummary := strings.TrimSpace(payload.Summary)
+	if runSummary == "" {
+		runSummary = summarizeRunMemoryContent(payload.Output)
+	}
+	if runSummary != "" {
+		title := "Run summary"
+		if NormalizeTaskMode(task.Mode) == TaskModePlan {
+			title = "Plan summary"
+		}
+		metadata := map[string]any{
+			"mode":           NormalizeTaskMode(task.Mode),
+			"plan_status":    strings.TrimSpace(payload.PlanStatus),
+			"delivery_state": strings.TrimSpace(payload.DeliveryState),
+			"branch_name":    strings.TrimSpace(payload.BranchName),
+		}
+		if err := s.storeRunMemory(ctx, task, "run_summary", title, runSummary, metadata); err != nil {
+			slog.Warn("store run summary failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		}
+	}
+
 	s.syncIssueExecutionStageForTask(ctx, task, CompletedStageForMode(task.Mode))
 
 	// Reconcile agent status
@@ -376,6 +480,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 	}
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg)
+
+	if trimmed := strings.TrimSpace(errMsg); trimmed != "" {
+		metadata := map[string]any{
+			"mode": NormalizeTaskMode(task.Mode),
+		}
+		if err := s.storeRunMemory(ctx, task, "failure_pattern", "Failure pattern", trimmed, metadata); err != nil {
+			slog.Warn("store failure pattern failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		}
+	}
 
 	if errMsg != "" {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
@@ -484,6 +597,47 @@ func priorityToInt(p string) int32 {
 	}
 }
 
+func summarizeRunMemoryContent(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\n\n", "\n")
+	if len(content) > 600 {
+		return strings.TrimSpace(content[:600])
+	}
+	return content
+}
+
+func (s *TaskService) storeRunMemory(ctx context.Context, task db.AgentTaskQueue, kind, title, content string, metadata map[string]any) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return err
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Queries.CreateRunMemory(ctx, db.CreateRunMemoryParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     task.IssueID,
+		TaskID:      pgtype.UUID{Bytes: task.ID.Bytes, Valid: true},
+		Kind:        kind,
+		Title:       title,
+		Content:     content,
+		Metadata:    metadataJSON,
+	})
+	return err
+}
+
 func (s *TaskService) updateTaskResult(ctx context.Context, taskID pgtype.UUID, result []byte) error {
 	return s.Queries.UpdateAgentTaskResult(ctx, db.UpdateAgentTaskResultParams{
 		ID:     taskID,
@@ -560,6 +714,8 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	}
 	payload["task_id"] = util.UUIDToString(task.ID)
 	payload["runtime_id"] = util.UUIDToString(task.RuntimeID)
+	payload["parent_task_id"] = util.UUIDToPtr(task.ParentTaskID)
+	payload["swarm_role"] = strings.TrimSpace(task.SwarmRole)
 
 	workspaceID := ""
 	if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
@@ -595,11 +751,13 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"task_id":  util.UUIDToString(task.ID),
-			"agent_id": util.UUIDToString(task.AgentID),
-			"issue_id": util.UUIDToString(task.IssueID),
-			"status":   task.Status,
-			"result":   result,
+			"task_id":        util.UUIDToString(task.ID),
+			"agent_id":       util.UUIDToString(task.AgentID),
+			"issue_id":       util.UUIDToString(task.IssueID),
+			"parent_task_id": util.UUIDToPtr(task.ParentTaskID),
+			"swarm_role":     strings.TrimSpace(task.SwarmRole),
+			"status":         task.Status,
+			"result":         result,
 		},
 	})
 }

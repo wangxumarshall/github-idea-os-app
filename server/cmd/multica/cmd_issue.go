@@ -103,6 +103,13 @@ var issueRunMessagesCmd = &cobra.Command{
 	RunE:  runIssueRunMessages,
 }
 
+var issueFanoutCmd = &cobra.Command{
+	Use:   "fanout <issue-id>",
+	Short: "Enqueue child tasks for an issue under the current task",
+	Args:  exactArgs(1),
+	RunE:  runIssueFanout,
+}
+
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
@@ -117,6 +124,7 @@ func init() {
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueFanoutCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
@@ -174,6 +182,11 @@ func init() {
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
+
+	// issue fanout
+	issueFanoutCmd.Flags().StringSlice("task", nil, "Child task spec: agent=<name-or-id>,mode=<plan|build>,role=<role> (repeatable)")
+	issueFanoutCmd.Flags().String("parent-task", "", "Parent task ID (defaults to MULTICA_TASK_ID)")
+	issueFanoutCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (required)")
@@ -712,7 +725,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, runs)
 	}
 
-	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+	headers := []string{"ID", "AGENT", "ROLE", "PARENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -731,6 +744,8 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		rows = append(rows, []string{
 			truncateID(strVal(r, "id")),
 			truncateID(strVal(r, "agent_id")),
+			strVal(r, "swarm_role"),
+			truncateID(strVal(r, "parent_task_id")),
 			strVal(r, "status"),
 			started,
 			completed,
@@ -791,6 +806,79 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runIssueFanout(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	specs, _ := cmd.Flags().GetStringSlice("task")
+	if len(specs) == 0 {
+		return fmt.Errorf("at least one --task spec is required")
+	}
+
+	parentTaskID, _ := cmd.Flags().GetString("parent-task")
+	if parentTaskID == "" {
+		parentTaskID = os.Getenv("MULTICA_TASK_ID")
+	}
+	if parentTaskID == "" {
+		return fmt.Errorf("parent task ID is required; use --parent-task or run inside a daemon task")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tasks := make([]map[string]any, 0, len(specs))
+	for _, spec := range specs {
+		parsed, err := parseFanoutTaskSpec(spec)
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(ctx, client, parsed["agent"])
+		if err != nil {
+			return fmt.Errorf("resolve agent %q: %w", parsed["agent"], err)
+		}
+		tasks = append(tasks, map[string]any{
+			"agent_id": agentID,
+			"mode":     parsed["mode"],
+			"role":     parsed["role"],
+		})
+	}
+
+	body := map[string]any{
+		"parent_task_id": parentTaskID,
+		"tasks":          tasks,
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/fanout", body, &result); err != nil {
+		return fmt.Errorf("fanout issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		taskItems, _ := result["tasks"].([]any)
+		headers := []string{"TASK ID", "AGENT ID", "MODE", "ROLE", "PARENT"}
+		rows := make([][]string, 0, len(taskItems))
+		for _, item := range taskItems {
+			task, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			rows = append(rows, []string{
+				truncateID(strVal(task, "id")),
+				truncateID(strVal(task, "agent_id")),
+				strVal(task, "mode"),
+				strVal(task, "swarm_role"),
+				truncateID(strVal(task, "parent_task_id")),
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
+	return cli.PrintJSON(os.Stdout, result)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -799,6 +887,57 @@ type assigneeMatch struct {
 	Type string // "member" or "agent"
 	ID   string // user_id for members, agent id for agents
 	Name string
+}
+
+func parseFanoutTaskSpec(raw string) (map[string]string, error) {
+	parsed := map[string]string{
+		"mode": "build",
+		"role": "",
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid --task spec %q", raw)
+		}
+		parsed[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	if parsed["agent"] == "" {
+		return nil, fmt.Errorf("--task spec %q is missing agent=<name-or-id>", raw)
+	}
+	if parsed["mode"] == "" {
+		parsed["mode"] = "build"
+	}
+	if parsed["mode"] != "plan" && parsed["mode"] != "build" {
+		return nil, fmt.Errorf("--task spec %q has invalid mode %q", raw, parsed["mode"])
+	}
+	return parsed, nil
+}
+
+func resolveAgentID(ctx context.Context, client *cli.APIClient, input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", fmt.Errorf("agent is required")
+	}
+
+	var direct map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+input, &direct); err == nil {
+		if id := strVal(direct, "id"); id != "" {
+			return id, nil
+		}
+	}
+
+	assigneeType, assigneeID, err := resolveAssignee(ctx, client, input)
+	if err != nil {
+		return "", err
+	}
+	if assigneeType != "agent" {
+		return "", fmt.Errorf("%q resolved to a %s, not an agent", input, assigneeType)
+	}
+	return assigneeID, nil
 }
 
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (string, string, error) {

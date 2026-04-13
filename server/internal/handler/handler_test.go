@@ -480,6 +480,131 @@ func TestConfirmPlanQueuesBuildForCodexAgent(t *testing.T) {
 	}
 }
 
+func TestFanOutIssueTasksQueuesChildTasks(t *testing.T) {
+	ctx := context.Background()
+	agentA := createTestAgentWithProvider(t, "claude")
+	agentB := createTestAgentWithProvider(t, "opencode")
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(ctx, testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'in_progress', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9101, NULL, $5, 'building'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Fanout test issue", agentA, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentA).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	var parentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, mode, swarm_role
+		) VALUES (
+			$1, $2, $3, 'running', 2, 'build', 'planner'
+		)
+		RETURNING id
+	`, agentA, runtimeID, issueID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/fanout", map[string]any{
+		"parent_task_id": parentTaskID,
+		"tasks": []map[string]any{
+			{"agent_id": agentA, "mode": "build", "role": "reviewer"},
+			{"agent_id": agentB, "mode": "build", "role": "tester"},
+		},
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.FanOutIssueTasks(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("FanOutIssueTasks: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND parent_task_id = $2
+	`, issueID, parentTaskID).Scan(&count); err != nil {
+		t.Fatalf("count child tasks: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 child tasks, got %d", count)
+	}
+}
+
+func TestFanOutIssueTasksRejectsDuplicateAgentSiblings(t *testing.T) {
+	ctx := context.Background()
+	agentA := createTestAgentWithProvider(t, "claude")
+	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(ctx, testPool, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ensure legacy idea: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			parent_issue_id, position, due_date, number, repo_url, idea_id, execution_stage
+		) VALUES (
+			$1, $2, NULL, 'in_progress', 'medium',
+			'agent', $3, 'member', $4,
+			NULL, 0, NULL, 9102, NULL, $5, 'building'
+		)
+		RETURNING id
+	`, testWorkspaceID, "Duplicate fanout issue", agentA, testUserID, legacyIdea.ID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentA).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	var parentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, mode, swarm_role
+		) VALUES (
+			$1, $2, $3, 'running', 2, 'build', 'planner'
+		)
+		RETURNING id
+	`, agentA, runtimeID, issueID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/fanout", map[string]any{
+		"parent_task_id": parentTaskID,
+		"tasks": []map[string]any{
+			{"agent_id": agentA, "mode": "build", "role": "reviewer"},
+			{"agent_id": agentA, "mode": "build", "role": "tester"},
+		},
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.FanOutIssueTasks(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("FanOutIssueTasks: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPlanThreadReplyQueuesAnotherPlanRun(t *testing.T) {
 	legacyIdea, err := testHandler.IdeaStore.EnsureLegacyIdea(context.Background(), testPool, testWorkspaceID)
 	if err != nil {

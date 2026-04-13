@@ -63,8 +63,11 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, mode, trigger_comment_id, trigger_source)
-VALUES ($1, $2, $3, 'queued', $4, $5, sqlc.narg(trigger_comment_id), $6)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, mode,
+    trigger_comment_id, trigger_source, parent_task_id, swarm_role
+)
+VALUES ($1, $2, $3, 'queued', $4, $5, sqlc.narg(trigger_comment_id), $6, sqlc.narg(parent_task_id), $7)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
@@ -84,8 +87,8 @@ WHERE id = $1;
 -- name: ClaimAgentTask :one
 -- Claims the next queued task for an agent, enforcing per-issue serialization:
 -- a task is only claimable when no other task for the same issue is already
--- dispatched or running. This guarantees serial execution within an issue
--- while allowing parallel execution across different issues.
+-- dispatched or running. Fan-out child tasks are modeled in the same queue but
+-- still execute serially until the broader issue/runtime semantics are upgraded.
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
@@ -164,13 +167,18 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
 -- the agent picks up new comments on the next cycle) but skip if a pending
 -- task already exists (natural dedup).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1
+  AND status IN ('queued', 'dispatched')
+  AND parent_task_id IS NULL;
 
 -- name: HasPendingTaskForIssueAndAgent :one
 -- Returns true if a specific agent already has a queued or dispatched task
 -- for the given issue. Used by @mention trigger dedup.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched')
+  AND parent_task_id IS NULL;
 
 -- name: ListPendingTasksByRuntime :many
 SELECT * FROM agent_task_queue
@@ -186,6 +194,11 @@ ORDER BY created_at DESC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListChildTasksByParent :many
+SELECT * FROM agent_task_queue
+WHERE parent_task_id = $1
+ORDER BY created_at ASC;
 
 -- name: GetLatestTaskCreatedAtByIssueAgentSource :one
 SELECT created_at FROM agent_task_queue

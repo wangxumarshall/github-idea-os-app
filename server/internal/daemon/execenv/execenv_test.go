@@ -185,6 +185,14 @@ func TestWriteContextFiles(t *testing.T) {
 
 	ctx := TaskContextForEnv{
 		IssueID: "test-issue-id-1234",
+		RunMemories: []RunMemoryContextForEnv{
+			{
+				Kind:      "run_summary",
+				Title:     "Previous attempt",
+				Content:   "The backend migration already exists; only wire the handler.",
+				CreatedAt: "2026-04-13T10:00:00Z",
+			},
+		},
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:    "Go Conventions",
@@ -208,6 +216,8 @@ func TestWriteContextFiles(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"test-issue-id-1234",
+		"## Recent Run Memory",
+		"Previous attempt",
 		"## Agent Skills",
 		"Go Conventions",
 	} {
@@ -238,6 +248,52 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 	if string(supportFile) != "package main" {
 		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	policyContent, err := os.ReadFile(RuntimePolicyFilePath(dir))
+	if err != nil {
+		t.Fatalf("failed to read policy.json: %v", err)
+	}
+	policy := string(policyContent)
+	for _, want := range []string{`"version": 1`, `"network_access": "deny"`, `"read_only": false`} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("policy.json missing %q", want)
+		}
+	}
+}
+
+func TestWriteContextFilesPlanModePolicy(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:         "plan-issue",
+		Mode:            "plan",
+		SelectedRepoURL: "https://github.com/org/backend",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/backend", Description: "Backend"},
+			{URL: "https://github.com/org/frontend", Description: "Frontend"},
+		},
+	}
+
+	if err := writeContextFiles(dir, "claude", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	policyContent, err := os.ReadFile(RuntimePolicyFilePath(dir))
+	if err != nil {
+		t.Fatalf("failed to read policy.json: %v", err)
+	}
+	policy := string(policyContent)
+	for _, want := range []string{
+		`"mode": "plan"`,
+		`"read_only": true`,
+		`"repo_checkout_restricted": true`,
+		`"preferred_repo_url": "https://github.com/org/backend"`,
+	} {
+		if !strings.Contains(policy, want) {
+			t.Errorf("policy.json missing %q", want)
+		}
 	}
 }
 

@@ -234,9 +234,14 @@ func (d *Daemon) providerToRuntimeMap() map[string]string {
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
 		version, err := agent.DetectVersion(ctx, entry.Path)
+		if err != nil {
+			d.logger.Warn("skip registering runtime", "name", name, "error", err)
+			continue
+		}
+		capabilities, err := agent.CapabilitiesFor(name)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue
@@ -245,11 +250,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    name,
-			"version": version,
-			"status":  "online",
+		runtimes = append(runtimes, map[string]any{
+			"name":         displayName,
+			"type":         name,
+			"version":      version,
+			"status":       "online",
+			"capabilities": capabilities,
 		})
 	}
 	if len(runtimes) == 0 {
@@ -497,6 +503,11 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Sandbox: agent.SandboxConfig{
+			Driver:      d.cfg.SandboxDriver,
+			Image:       d.cfg.SandboxImage,
+			NetworkMode: d.cfg.SandboxNetworkMode,
+		},
 	})
 	if err != nil {
 		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
@@ -900,10 +911,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                 task.IssueID,
 		Mode:                    task.Mode,
+		ParentTaskID:            task.ParentTaskID,
+		SwarmRole:               task.SwarmRole,
 		TriggerCommentID:        task.TriggerCommentID,
 		AgentName:               agentName,
 		AgentInstructions:       instructions,
 		AgentSkills:             convertSkillsForEnv(skills),
+		RunMemories:             convertMemoriesForEnv(task.Memories),
 		Repos:                   convertReposForEnv(task.Repos),
 		SelectedRepoURL:         task.SelectedRepoURL,
 		SelectedRepoDescription: task.SelectedRepoDescription,
@@ -963,6 +977,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_POLICY_FILE":  execenv.RuntimePolicyFilePath(env.WorkDir),
 		"PATH":                 "/home/ubuntu/multica/server/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
@@ -976,10 +991,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.TraeTrajectoryFile != "" {
 		agentEnv["MULTICA_TRAE_TRAJECTORY_FILE"] = env.TraeTrajectoryFile
 	}
+	if env.HermesHome != "" {
+		agentEnv["HERMES_HOME"] = env.HermesHome
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Sandbox: agent.SandboxConfig{
+			Driver:      d.cfg.SandboxDriver,
+			Image:       d.cfg.SandboxImage,
+			NetworkMode: d.cfg.SandboxNetworkMode,
+		},
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -1025,9 +1048,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			if pendingThinking.Len() > 0 {
 				s := seq.Add(1)
 				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "thinking",
-					Content: pendingThinking.String(),
+					Seq:      int(s),
+					Type:     "thinking",
+					Content:  pendingThinking.String(),
+					Metadata: map[string]any{"provider": provider},
 				})
 				pendingThinking.Reset()
 			}
@@ -1035,9 +1059,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			if pendingText.Len() > 0 {
 				s := seq.Add(1)
 				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "text",
-					Content: pendingText.String(),
+					Seq:      int(s),
+					Type:     "text",
+					Content:  pendingText.String(),
+					Metadata: map[string]any{"provider": provider},
 				})
 				pendingText.Reset()
 			}
@@ -1071,6 +1096,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}()
 
 		for msg := range session.Messages {
+			metadata := canonicalMessageMetadata(provider, msg)
 			switch msg.Type {
 			case agent.MessageToolUse:
 				n := toolCount.Add(1)
@@ -1083,10 +1109,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				s := seq.Add(1)
 				mu.Lock()
 				batch = append(batch, TaskMessageData{
-					Seq:   int(s),
-					Type:  "tool_use",
-					Tool:  msg.Tool,
-					Input: msg.Input,
+					Seq:      int(s),
+					Type:     "tool_use",
+					Tool:     msg.Tool,
+					Input:    msg.Input,
+					Metadata: metadata,
 				})
 				mu.Unlock()
 			case agent.MessageToolResult:
@@ -1104,10 +1131,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				}
 				mu.Lock()
 				batch = append(batch, TaskMessageData{
-					Seq:    int(s),
-					Type:   "tool_result",
-					Tool:   toolName,
-					Output: output,
+					Seq:      int(s),
+					Type:     "tool_result",
+					Tool:     toolName,
+					Output:   output,
+					Metadata: metadata,
 				})
 				mu.Unlock()
 			case agent.MessageThinking:
@@ -1128,9 +1156,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				s := seq.Add(1)
 				mu.Lock()
 				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "error",
-					Content: msg.Content,
+					Seq:      int(s),
+					Type:     "error",
+					Content:  msg.Content,
+					Metadata: metadata,
+				})
+				mu.Unlock()
+			case agent.MessageStatus:
+				taskLog.Debug("agent status", "status", msg.Status)
+				s := seq.Add(1)
+				mu.Lock()
+				batch = append(batch, TaskMessageData{
+					Seq:      int(s),
+					Type:     "status",
+					Content:  msg.Status,
+					Metadata: metadata,
+				})
+				mu.Unlock()
+			case agent.MessageLog:
+				taskLog.Debug("agent log", "level", msg.Level, "content", truncateLog(msg.Content, 200))
+				s := seq.Add(1)
+				mu.Lock()
+				batch = append(batch, TaskMessageData{
+					Seq:      int(s),
+					Type:     "log",
+					Content:  msg.Content,
+					Metadata: metadata,
 				})
 				mu.Unlock()
 			}
@@ -1365,6 +1416,22 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+	}
+	return result
+}
+
+func convertMemoriesForEnv(memories []RunMemoryData) []execenv.RunMemoryContextForEnv {
+	if len(memories) == 0 {
+		return nil
+	}
+	result := make([]execenv.RunMemoryContextForEnv, len(memories))
+	for i, memory := range memories {
+		result[i] = execenv.RunMemoryContextForEnv{
+			Kind:      memory.Kind,
+			Title:     memory.Title,
+			Content:   memory.Content,
+			CreatedAt: memory.CreatedAt,
+		}
 	}
 	return result
 }

@@ -125,6 +125,9 @@ The daemon auto-detects these AI CLIs on your PATH:
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
+| [OpenCode](https://opencode.ai/docs/cli/) | `opencode` | Open source coding agent CLI |
+| [Trae CLI](https://github.com/bytedance/trae-agent) | `trae-cli` | Trae Agent CLI |
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) | `hermes` | Hermes local coding/runtime agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -159,6 +162,15 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
+| `MULTICA_TRAE_PATH` | Custom path to the `trae-cli` binary |
+| `MULTICA_TRAE_MODEL` | Override the Trae model used |
+| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
+| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
+| `MULTICA_SANDBOX_DRIVER` | Process sandbox driver: `host` or `docker` |
+| `MULTICA_SANDBOX_IMAGE` | Docker image used when `MULTICA_SANDBOX_DRIVER=docker` |
+| `MULTICA_SANDBOX_NETWORK_MODE` | Docker network mode (defaults to `host`) |
 
 ### Self-Hosted Server
 
@@ -243,6 +255,19 @@ Available filters: `--status`, `--priority`, `--assignee`, `--limit`.
 multica issue get <id>
 multica issue get <id> --output json
 ```
+
+### Fan Out Child Tasks
+
+```bash
+multica issue fanout <issue-id> \
+  --task agent="Reviewer Agent",mode=build,role=reviewer \
+  --task agent="Tester Agent",mode=build,role=tester
+```
+
+This enqueues child tasks under the current task or an explicit `--parent-task`.
+The backend records the parent/child relationship and swarm role, but issue
+execution remains serialized today; fan-out currently models decomposition and
+history, not parallel issue completion.
 
 ### Create Issue
 

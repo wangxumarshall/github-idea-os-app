@@ -30,16 +30,27 @@ type PrepareParams struct {
 type TaskContextForEnv struct {
 	IssueID                 string
 	Mode                    string
+	ParentTaskID            string
+	SwarmRole               string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
+	RunMemories             []RunMemoryContextForEnv
 	Repos                   []RepoContextForEnv // workspace repos available for checkout
 	SelectedRepoURL         string
 	SelectedRepoDescription string
 	IdeaSlug                string
 	IdeaCode                string
 	IdeaTitle               string
+}
+
+// RunMemoryContextForEnv describes recent execution memory injected into the workdir.
+type RunMemoryContextForEnv struct {
+	Kind      string
+	Title     string
+	Content   string
+	CreatedAt string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -67,6 +78,8 @@ type Environment struct {
 	TraeConfigFile string
 	// TraeTrajectoryFile points to the per-task Trae trajectory file.
 	TraeTrajectoryFile string
+	// HermesHome is the per-task HERMES_HOME directory.
+	HermesHome string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -135,6 +148,18 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.TraeConfigFile = traeConfigFile
 		env.TraeTrajectoryFile = trajectoryFile
 	}
+	if params.Provider == "hermes" {
+		hermesHome := filepath.Join(envRoot, "hermes-home")
+		if err := prepareHermesHome(hermesHome, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
+		}
+		if len(params.Task.AgentSkills) > 0 {
+			if err := writeSkillFiles(filepath.Join(hermesHome, "skills"), params.Task.AgentSkills); err != nil {
+				return nil, fmt.Errorf("execenv: write hermes skills: %w", err)
+			}
+		}
+		env.HermesHome = hermesHome
+	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
 	return env, nil
@@ -174,6 +199,18 @@ func Reuse(workDir, provider string, task TaskContextForEnv, logger *slog.Logger
 		} else {
 			env.TraeConfigFile = traeConfigFile
 			env.TraeTrajectoryFile = trajectoryFile
+		}
+	case "hermes":
+		hermesHome := filepath.Join(env.RootDir, "hermes-home")
+		if err := prepareHermesHome(hermesHome, logger); err != nil {
+			logger.Warn("execenv: refresh hermes-home failed", "error", err)
+		} else {
+			if len(task.AgentSkills) > 0 {
+				if err := writeSkillFiles(filepath.Join(hermesHome, "skills"), task.AgentSkills); err != nil {
+					logger.Warn("execenv: refresh hermes skills failed", "error", err)
+				}
+			}
+			env.HermesHome = hermesHome
 		}
 	}
 

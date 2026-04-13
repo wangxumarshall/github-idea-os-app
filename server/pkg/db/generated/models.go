@@ -81,6 +81,8 @@ type AgentTaskQueue struct {
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	TriggerSource    string             `json:"trigger_source"`
 	Mode             string             `json:"mode"`
+	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
+	SwarmRole        string             `json:"swarm_role"`
 }
 
 type Attachment struct {
@@ -309,6 +311,18 @@ type PersonalAccessToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type RunMemory struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	Kind        string             `json:"kind"`
+	Title       string             `json:"title"`
+	Content     string             `json:"content"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
@@ -354,6 +368,7 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Metadata  []byte             `json:"metadata"`
 }
 
 type User struct {

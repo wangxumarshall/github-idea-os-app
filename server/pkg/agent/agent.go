@@ -72,15 +72,23 @@ type Result struct {
 	SessionID  string
 }
 
+// SandboxConfig controls how the agent process itself is launched.
+type SandboxConfig struct {
+	Driver      string
+	Image       string
+	NetworkMode string
+}
+
 // Config configures a Backend instance.
 type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, opencode, or trae-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	Sandbox        SandboxConfig
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "opencode", "trae".
+// Supported types: "claude", "codex", "opencode", "trae", "hermes".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -95,8 +103,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &opencodeBackend{cfg: cfg}, nil
 	case "trae":
 		return &traeBackend{cfg: cfg}, nil
+	case "hermes":
+		return &hermesBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, trae)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, opencode, trae, hermes)", agentType)
 	}
 }
 

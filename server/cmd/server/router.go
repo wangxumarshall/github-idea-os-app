@@ -191,6 +191,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Post("/confirm-plan", h.ConfirmPlan)
+					r.Post("/fanout", h.FanOutIssueTasks)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)

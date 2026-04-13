@@ -20,6 +20,8 @@ const (
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
+	DefaultSandboxDriver         = "host"
+	DefaultSandboxNetworkMode    = "host"
 )
 
 // Config holds all daemon configuration.
@@ -35,6 +37,9 @@ type Config struct {
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
+	SandboxDriver      string
+	SandboxImage       string
+	SandboxNetworkMode string
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
@@ -54,6 +59,9 @@ type Overrides struct {
 	RuntimeName        string
 	Profile            string // profile name (empty = default)
 	HealthPort         int    // health check port (0 = use default)
+	SandboxDriver      string
+	SandboxImage       string
+	SandboxNetworkMode string
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -99,8 +107,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_TRAE_MODEL")),
 		}
 	}
+	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
+	if _, err := exec.LookPath(hermesPath); err == nil {
+		agents["hermes"] = AgentEntry{
+			Path:  hermesPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, or trae-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, opencode, trae-cli, or hermes and ensure it is on PATH")
 	}
 
 	// Host info
@@ -166,6 +181,19 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		runtimeName = overrides.RuntimeName
 	}
 
+	sandboxDriver := envOrDefault("MULTICA_SANDBOX_DRIVER", DefaultSandboxDriver)
+	if overrides.SandboxDriver != "" {
+		sandboxDriver = overrides.SandboxDriver
+	}
+	sandboxImage := strings.TrimSpace(os.Getenv("MULTICA_SANDBOX_IMAGE"))
+	if overrides.SandboxImage != "" {
+		sandboxImage = overrides.SandboxImage
+	}
+	sandboxNetworkMode := envOrDefault("MULTICA_SANDBOX_NETWORK_MODE", DefaultSandboxNetworkMode)
+	if overrides.SandboxNetworkMode != "" {
+		sandboxNetworkMode = overrides.SandboxNetworkMode
+	}
+
 	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
 	workspacesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
 	if overrides.WorkspacesRoot != "" {
@@ -207,6 +235,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		KeepEnvAfterTask:   keepEnv,
 		HealthPort:         healthPort,
 		MaxConcurrentTasks: maxConcurrentTasks,
+		SandboxDriver:      sandboxDriver,
+		SandboxImage:       sandboxImage,
+		SandboxNetworkMode: sandboxNetworkMode,
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,

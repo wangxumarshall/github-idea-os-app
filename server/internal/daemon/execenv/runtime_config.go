@@ -14,13 +14,14 @@ import (
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 // For Trae:     writes {workDir}/AGENTS.md  (skills referenced via .agent_context/skills/)
+// For Hermes:   writes {workDir}/AGENTS.md  (skills/config live under HERMES_HOME)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "opencode", "trae":
+	case "codex", "opencode", "trae", "hermes":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	default:
 		// Unknown provider — skip config injection, prompt-only mode.
@@ -46,6 +47,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Multica CLI\n\n")
 	b.WriteString("Use the `multica` CLI for all Multica data and actions. Do not use `curl`, `wget`, or direct HTTP calls against Multica URLs.\n\n")
 	b.WriteString("Always use `--output json` on read commands.\n\n")
+	b.WriteString("A task policy file is available at `.agent_context/policy.json` and via the `MULTICA_POLICY_FILE` env var. Treat it as a hard runtime contract.\n\n")
 
 	b.WriteString("### Read Commands\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
@@ -60,6 +62,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("### Write Commands\n")
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
+	b.WriteString("- `multica issue fanout <issue-id> --task agent=<name-or-id>,mode=<plan|build>,role=<role> [--task ...]` — Enqueue child tasks under the current task\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n\n")
 
@@ -187,7 +190,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Installed Skills\n\n")
 		switch provider {
-		case "claude", "codex", "opencode":
+		case "claude", "codex", "opencode", "hermes":
 			b.WriteString("These skills are installed natively for this provider:\n\n")
 		case "trae":
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each skill directory contains a `SKILL.md` file.\n\n")

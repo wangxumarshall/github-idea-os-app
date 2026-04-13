@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -43,8 +42,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if execPath == "" {
 		execPath = "codex"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
+	if err := validateExecutable(execPath, b.cfg.Sandbox); err != nil {
+		return nil, fmt.Errorf("codex executable not available: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -53,11 +52,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "app-server", "--listen", "stdio://")
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := buildCommand(runCtx, execPath, []string{"app-server", "--listen", "stdio://"}, opts.Cwd, b.cfg.Env, b.cfg.Sandbox)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build codex command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

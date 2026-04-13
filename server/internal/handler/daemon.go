@@ -15,13 +15,16 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
-func mergeRuntimeMetadata(existing []byte, version, cliVersion string) []byte {
+func mergeRuntimeMetadata(existing []byte, version, cliVersion string, capabilities map[string]any) []byte {
 	merged := map[string]any{}
 	if len(existing) > 0 {
 		_ = json.Unmarshal(existing, &merged)
 	}
 	merged["version"] = version
 	merged["cli_version"] = cliVersion
+	if len(capabilities) > 0 {
+		merged["capabilities"] = capabilities
+	}
 	data, _ := json.Marshal(merged)
 	return data
 }
@@ -36,10 +39,11 @@ type DaemonRegisterRequest struct {
 	DeviceName  string `json:"device_name"`
 	CLIVersion  string `json:"cli_version"` // multica CLI version
 	Runtimes    []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name         string         `json:"name"`
+		Type         string         `json:"type"`
+		Version      string         `json:"version"` // agent CLI version (claude/codex)
+		Status       string         `json:"status"`
+		Capabilities map[string]any `json:"capabilities,omitempty"`
 	} `json:"runtimes"`
 }
 
@@ -122,7 +126,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if existing, ok := existingByProvider[provider]; ok {
 			existingMetadata = existing.Metadata
 		}
-		metadata := mergeRuntimeMetadata(existingMetadata, runtime.Version, req.CLIVersion)
+		metadata := mergeRuntimeMetadata(existingMetadata, runtime.Version, req.CLIVersion, runtime.Capabilities)
 
 		registered, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: parseUUID(req.WorkspaceID),
@@ -278,6 +282,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Include workspace ID and repos so the daemon can set up worktrees.
 	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+		if memories, err := h.Queries.ListRecentRunMemoryByIssue(r.Context(), db.ListRecentRunMemoryByIssueParams{
+			IssueID: task.IssueID,
+			Limit:   5,
+		}); err == nil && len(memories) > 0 {
+			resp.Memories = make([]RunMemoryResponse, len(memories))
+			for i, memory := range memories {
+				resp.Memories[i] = RunMemoryResponse{
+					ID:        uuidToString(memory.ID),
+					Kind:      memory.Kind,
+					Title:     memory.Title,
+					Content:   memory.Content,
+					CreatedAt: timestampToString(memory.CreatedAt),
+				}
+			}
+		}
 		if issue.RepoUrl.Valid {
 			resp.SelectedRepoURL = issue.RepoUrl.String
 		}
@@ -467,12 +486,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type TaskMessageRequest struct {
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`
-	Tool    string         `json:"tool,omitempty"`
-	Content string         `json:"content,omitempty"`
-	Input   map[string]any `json:"input,omitempty"`
-	Output  string         `json:"output,omitempty"`
+	Seq      int            `json:"seq"`
+	Type     string         `json:"type"`
+	Tool     string         `json:"tool,omitempty"`
+	Content  string         `json:"content,omitempty"`
+	Input    map[string]any `json:"input,omitempty"`
+	Output   string         `json:"output,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type TaskMessageBatchRequest struct {
@@ -514,26 +534,32 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
+		var metadataJSON []byte
+		if msg.Metadata != nil {
+			metadataJSON, _ = json.Marshal(msg.Metadata)
+		}
 		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
-			TaskID:  parseUUID(taskID),
-			Seq:     int32(msg.Seq),
-			Type:    msg.Type,
-			Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
-			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
-			Input:   inputJSON,
-			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
+			TaskID:   parseUUID(taskID),
+			Seq:      int32(msg.Seq),
+			Type:     msg.Type,
+			Tool:     pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
+			Content:  pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
+			Input:    inputJSON,
+			Output:   pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
+			Metadata: metadataJSON,
 		})
 
 		if workspaceID != "" {
 			h.publish(protocol.EventTaskMessage, workspaceID, "system", "", protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
+				TaskID:   taskID,
+				IssueID:  uuidToString(task.IssueID),
+				Seq:      msg.Seq,
+				Type:     msg.Type,
+				Tool:     msg.Tool,
+				Content:  msg.Content,
+				Input:    msg.Input,
+				Output:   msg.Output,
+				Metadata: msg.Metadata,
 			})
 		}
 	}
@@ -578,15 +604,20 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if m.Input != nil {
 			json.Unmarshal(m.Input, &input)
 		}
+		var metadata map[string]any
+		if m.Metadata != nil {
+			json.Unmarshal(m.Metadata, &metadata)
+		}
 		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
+			TaskID:   taskID,
+			IssueID:  issueID,
+			Seq:      int(m.Seq),
+			Type:     m.Type,
+			Tool:     m.Tool.String,
+			Content:  m.Content.String,
+			Input:    input,
+			Output:   m.Output.String,
+			Metadata: metadata,
 		}
 	}
 

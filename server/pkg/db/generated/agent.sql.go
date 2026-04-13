@@ -53,7 +53,7 @@ const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -78,6 +78,8 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -119,13 +121,13 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 // Claims the next queued task for an agent, enforcing per-issue serialization:
 // a task is only claimable when no other task for the same issue is already
-// dispatched or running. This guarantees serial execution within an issue
-// while allowing parallel execution across different issues.
+// dispatched or running. Fan-out child tasks are modeled in the same queue but
+// still execute serially until the broader issue/runtime semantics are upgraded.
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue
@@ -148,6 +150,8 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -156,7 +160,7 @@ const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4
 WHERE id = $1 AND status = 'running'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 type CompleteAgentTaskParams struct {
@@ -193,6 +197,8 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -276,9 +282,12 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 }
 
 const createAgentTask = `-- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, mode, trigger_comment_id, trigger_source)
-VALUES ($1, $2, $3, 'queued', $4, $5, $7, $6)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, mode,
+    trigger_comment_id, trigger_source, parent_task_id, swarm_role
+)
+VALUES ($1, $2, $3, 'queued', $4, $5, $8, $6, $9, $7)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 type CreateAgentTaskParams struct {
@@ -288,7 +297,9 @@ type CreateAgentTaskParams struct {
 	Priority         int32       `json:"priority"`
 	Mode             string      `json:"mode"`
 	TriggerSource    string      `json:"trigger_source"`
+	SwarmRole        string      `json:"swarm_role"`
 	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+	ParentTaskID     pgtype.UUID `json:"parent_task_id"`
 }
 
 func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams) (AgentTaskQueue, error) {
@@ -299,7 +310,9 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.Priority,
 		arg.Mode,
 		arg.TriggerSource,
+		arg.SwarmRole,
 		arg.TriggerCommentID,
+		arg.ParentTaskID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -321,6 +334,8 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -329,7 +344,7 @@ const failAgentTask = `-- name: FailAgentTask :one
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = $2
 WHERE id = $1 AND status IN ('dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 type FailAgentTaskParams struct {
@@ -359,6 +374,8 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -475,7 +492,7 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 }
 
 const getAgentTask = `-- name: GetAgentTask :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
 WHERE id = $1
 `
 
@@ -501,6 +518,8 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
@@ -566,7 +585,9 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
+WHERE issue_id = $1
+  AND status IN ('queued', 'dispatched')
+  AND parent_task_id IS NULL
 `
 
 // Returns true if there is a queued or dispatched (but not yet running) task for the issue.
@@ -582,7 +603,10 @@ func (q *Queries) HasPendingTaskForIssue(ctx context.Context, issueID pgtype.UUI
 
 const hasPendingTaskForIssueAndAgent = `-- name: HasPendingTaskForIssueAndAgent :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched')
+  AND parent_task_id IS NULL
 `
 
 type HasPendingTaskForIssueAndAgentParams struct {
@@ -600,7 +624,7 @@ func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPen
 }
 
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 ORDER BY created_at DESC
 `
@@ -633,6 +657,8 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.TriggerCommentID,
 			&i.TriggerSource,
 			&i.Mode,
+			&i.ParentTaskID,
+			&i.SwarmRole,
 		); err != nil {
 			return nil, err
 		}
@@ -645,7 +671,7 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC
 `
@@ -678,6 +704,8 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 			&i.TriggerCommentID,
 			&i.TriggerSource,
 			&i.Mode,
+			&i.ParentTaskID,
+			&i.SwarmRole,
 		); err != nil {
 			return nil, err
 		}
@@ -781,8 +809,55 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listChildTasksByParent = `-- name: ListChildTasksByParent :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
+WHERE parent_task_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListChildTasksByParent(ctx context.Context, parentTaskID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listChildTasksByParent, parentTaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.TriggerSource,
+			&i.Mode,
+			&i.ParentTaskID,
+			&i.SwarmRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC
 `
@@ -815,6 +890,8 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.TriggerCommentID,
 			&i.TriggerSource,
 			&i.Mode,
+			&i.ParentTaskID,
+			&i.SwarmRole,
 		); err != nil {
 			return nil, err
 		}
@@ -873,7 +950,7 @@ func (q *Queries) ListRunnableAgents(ctx context.Context) ([]Agent, error) {
 }
 
 const listTasksByIssue = `-- name: ListTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC
 `
@@ -906,6 +983,8 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 			&i.TriggerCommentID,
 			&i.TriggerSource,
 			&i.Mode,
+			&i.ParentTaskID,
+			&i.SwarmRole,
 		); err != nil {
 			return nil, err
 		}
@@ -954,7 +1033,7 @@ const startAgentTask = `-- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running', started_at = now()
 WHERE id = $1 AND status = 'dispatched'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, trigger_source, mode, parent_task_id, swarm_role
 `
 
 func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -979,6 +1058,8 @@ func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTask
 		&i.TriggerCommentID,
 		&i.TriggerSource,
 		&i.Mode,
+		&i.ParentTaskID,
+		&i.SwarmRole,
 	)
 	return i, err
 }
