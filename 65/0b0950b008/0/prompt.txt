@@ -1,0 +1,28 @@
+深度研究本项目后段的沙箱执行时（multica 命令），然后再调用subagent研究如下每个代码仓，获取构建自我演进、agent群体智能、统一记忆的，支持claudecode/codex/opencode/trae-cli/openclaw等热门agent的超级运行时的方案。我的意图是构建一个100%达成效果的从小idea到最终产品的自动化ai系统（或opc），你要理解我的意图然后全网检索和深度思考，因为我当前的思考也不完备，希望你作为国际顶级的ai agent专家/学者和行业大牛，深度思考 “全自动化的ai系统（从一个小idea完成最终产品设计/开发/测试/验证/交付全流程）”：检索方向包括但不限于以下链接，要到github上检索好项目：https://github.com/HKUDS/OpenHarness
+https://github.com/HKUDS/OpenSpace
+https://github.com/HKUDS/ClawTeam
+https://github.com/orgs/HKUDS/repositories?type=all
+
+---
+
+批判性review上述方案，要做能够复用现有的能力或代码
+
+---
+
+web端轻量化，甚至维持不变，但后端做深度改造
+
+---
+
+Implement the plan.
+
+---
+
+实现  - light swarm/fan-out orchestration。 - stronger sandbox drivers beyond current host-policy foundation。研究并适配 hermes-agent
+
+---
+
+解决问题，再汇报暂存区功能、价值、实现
+
+---
+
+通过操控浏览器，验证测试上述功能
