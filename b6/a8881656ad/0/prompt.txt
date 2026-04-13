@@ -1,0 +1,22 @@
+深度理解：如下是我对本项目的重新定义，请深度理解我的意图，讲清楚本项目：  • V1 你更想先做成哪一种？                                                                            │
+│       answer: 自动产品工厂 (Recommended)                                                                                                                               │
+│     • V1 运行形态优先哪种？                                                                                                                                            │
+│       answer: 本地优先+云协同 (Recommended)                                                                                                                            │
+│       note:                                                                                                                                                            │
+│   本地优先，同时尽可能在本地实现群体智能、统一记忆、agent自演进，云端负责对外的用户接口，因此云端越简洁越好。复杂留给本地或后端，同时也能服用业界的快速研究成果，      │
+│             比如open harness、evo skills、autoresearchclaw、aaif-goose/goose、langchain-ai/deepagents、hyperagent、meta-harness等等                                    │
+│     • 对 Claude Code / Codex / OpenCode 等热门 agent 的关系，你希望哪种？                                                                                              │
+│       answer: 先适配现有 CLI (Recommended)                                                                                                                             │
+│       note: 永远都要复用现有的能力，比如claude code、codex、opencode等等，只有站在巨人肩膀上才能走的更远。
+
+---
+
+你的理解是对的。把上述理解深刻理解后同步到readme文件
+
+---
+
+秀爱
+
+---
+
+修改
