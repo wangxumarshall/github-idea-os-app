@@ -15,11 +15,12 @@ Multica is an AI-native task management platform with a Go backend (`server/`), 
 
 ## Key Commands (YOU MUST use these exact commands)
 
-- Main checkout first setup: `cp .env.example .env` then `make setup-main`
+- Main-checkout first setup: `test -f .env || cp .env.example .env` then `make setup-main`
+- Main-checkout start: `make start-main`
+- Main-checkout stop: `make stop-main`
 - Worktree first setup: `make worktree-env` then `make setup-worktree`
-- Current checkout setup: `make setup`
-- Current checkout start: `make start`
-- Current checkout stop: `make stop`
+- Worktree start: `make start-worktree`
+- Worktree stop: `make stop-worktree`
 - Backend-only dev: `make dev`
 - Local daemon: `make daemon`
 - Shared PostgreSQL: `make db-up` and `make db-down`
@@ -36,7 +37,6 @@ Multica is an AI-native task management platform with a Go backend (`server/`), 
 - Focused E2E spec: `pnpm exec playwright test e2e/issues.spec.ts`
 - Main-checkout full verification: `make check-main`
 - Worktree full verification: `make check-worktree`
-- Current-checkout full verification: `make check`
 
 ## Repository Structure
 
@@ -88,9 +88,9 @@ Multica is an AI-native task management platform with a Go backend (`server/`), 
 - After any web code change, YOU MUST run `pnpm typecheck`, `pnpm lint`, and the narrowest relevant web test command.
 - After any backend code change, YOU MUST run the narrowest relevant `go test` command and broaden to `cd server && go test ./...` when the change crosses packages.
 - After any E2E change, YOU MUST run the narrowest relevant Playwright spec.
-- For cross-surface or user-visible flow changes, finish with `make check` unless the user explicitly wants a narrower proof point.
-- IMPORTANT: `make check` runs TypeScript typecheck, Vitest, Go tests, and Playwright. It does NOT run `pnpm lint`.
-- Before opening a PR, the relevant checks MUST pass. For web work that means `pnpm lint`, `pnpm test`, and `pnpm typecheck`; for broader workflow changes that also means `make check`.
+- For cross-surface or user-visible flow changes, finish with `make check-main` in the main checkout or `make check-worktree` in a worktree unless the user explicitly wants a narrower proof point.
+- IMPORTANT: `make check`, `make check-main`, and `make check-worktree` run TypeScript typecheck, Vitest, Go tests, and Playwright. They do NOT run `pnpm lint`.
+- Before opening a PR, the relevant checks MUST pass. For web work that means `pnpm lint`, `pnpm test`, and `pnpm typecheck`; for broader workflow changes that also means the checkout-appropriate full verification target (`make check-main` or `make check-worktree`).
 - Work is not done until the relevant lint, tests, and typecheck pass, and the changed flow has been sanity-checked manually when possible.
 
 ## Security (IMPORTANT - NEVER violate)
@@ -113,7 +113,7 @@ Multica is an AI-native task management platform with a Go backend (`server/`), 
 
 - `make db-down` stops PostgreSQL but keeps the Docker volume and local databases.
 - `docker compose down -v` deletes the shared PostgreSQL volume and wipes the main database plus every worktree database.
-- Direct Playwright runs do not start backend or frontend. `make check` is the only built-in flow that can start missing services for E2E.
+- Direct Playwright runs do not start backend or frontend. The `make check*` targets are the built-in flows that can start missing services for E2E.
 - The local daemon depends on `claude` / `codex` CLI availability in `PATH`.
-- There is no repo-wide lint step inside `make check`. Do not assume broad verification covered lint.
+- There is no repo-wide lint step inside `make check`, `make check-main`, or `make check-worktree`. Do not assume broad verification covered lint.
 - Keep this root file short. Put subtree-specific detail in the nearest child `AGENTS.md`.
