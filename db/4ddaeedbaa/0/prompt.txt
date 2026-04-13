@@ -30,3 +30,7 @@
 更新readme 记忆系统 当前采用https://github.com/zilliztech/memsearch，后期扩展到https://github.com/volcengine/OpenViking。具体如下：起步/验证阶段 → memsearch（零成本、完美兼容你列出的所有 Agent，Markdown 可直接审查 Agent 记忆）。
 生产/自演进阶段 → memsearch + OpenViking 混合：用 memsearch 做透明 Markdown 层（人类可编辑），OpenViking 做上层 viking:// 抽象 + L0/L1/L2 + 自动提取（实现真正群体智能 + 自我进化）。
 终极目标：把 memsearch 的 Markdown 目录映射成 OpenViking 的 viking://user/memories/，实现“透明 + 统一 + 自演进”三合一。
+
+---
+
+提交代码
