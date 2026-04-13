@@ -12,10 +12,10 @@
 
 # Multica
 
-**Your next 10 hires won't be human.**
+**Local-first automatic product factory for existing agent CLIs.**
 
-Open-source platform that turns coding agents into real teammates.<br/>
-Assign tasks, track progress, compound skills — manage your human + agent workforce in one place.
+Open-source system for shipping products through the loop `idea -> spec -> repo -> root task -> fanout -> implement/verify -> delivery`.<br/>
+Keep memory, policy, repo/worktree control, and swarm execution in the local runtime; use the cloud as a thin control plane.
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -29,23 +29,34 @@ Assign tasks, track progress, compound skills — manage your human + agent work
 
 ## What is Multica?
 
-Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
+Multica is not an AI Jira with bots attached. It is a local-first automatic product factory that owns the loop `idea -> spec -> repo -> root task -> fanout -> implement/verify -> delivery`. Issues, boards, and agent identities are operator surfaces for that loop, not the core product.
 
-No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. The local runtime currently supports **Claude Code**, **Codex**, **OpenCode**, **Trae CLI**, and **Hermes Agent**.
+The local daemon/runtime is the intelligence core. It is where task-scoped workdirs, repo/worktree control, unified memory, policy enforcement, swarm coordination, session reuse, and future self-evolution belong. The cloud is intentionally thin: login, workspace sync, queueing, visualization, and remote entry.
+
+**Claude Code**, **Codex**, **OpenCode**, **Trae CLI**, and **Hermes Agent** are execution engines inside that system. Multica is the orchestration layer above them, adding unified task, memory, policy, repo checkout, worktree isolation, swarm primitives, and observability instead of replacing their native capabilities.
 
 <p align="center">
   <img src="docs/assets/hero-screenshot.png" alt="Multica board view" width="800">
 </p>
 
+## V1 Direction
+
+- **Automatic Product Factory** — the primary loop is `idea/spec -> repo -> task graph -> execution -> delivery`, not just issue tracking.
+- **Local-First + Cloud Coordination** — keep group intelligence, unified memory, swarm coordination, policy, and future self-evolution in the local runtime; keep the cloud limited to login, workspace sync, queueing, visualization, and remote entry.
+- **Adapt Existing Agent CLIs** — treat Claude Code, Codex, OpenCode, and similar tools as the execution substrate, not as optional integrations into a Multica-native agent.
+
 ## Features
 
-- **Agents as Teammates** — assign to an agent like you'd assign to a colleague. They have profiles, show up on the board, post comments, create issues, and report blockers proactively.
-- **Backend-First Runtime Kernel** — a unified backend runtime normalizes multiple coding-agent CLIs behind one task, event, and execution model.
+- **Product Loop, End to End** — IdeaOS links versioned idea docs, project repos, root tasks, fanout flows, and delivery workflows so product intent can move through one continuous execution system.
+- **Local Runtime Kernel** — the daemon on your machine is the execution core, not a thin relay.
+- **Existing CLIs as Execution Engines** — Claude Code, Codex, OpenCode, Trae CLI, and Hermes Agent run as the execution layer under Multica orchestration.
+- **Unified CLI Orchestration** — Multica adds one task, event, memory, policy, repo/worktree, and capability model above those CLIs.
 - **Task-Scoped Execution Environments** — each task gets its own workdir, policy file, runtime-native instruction injection, and controlled repository checkout flow.
 - **Execution Memory** — completed and failed runs write back compact execution memory that can be re-injected into future tasks on the same issue.
-- **Light Swarm Data Model** — parent/child task relationships and swarm roles are modeled in the backend so work can be decomposed without changing the web app first.
+- **Light Swarm Primitives** — parent/child task relationships and swarm roles are modeled in the backend so work can be decomposed before the full swarm product is built out.
 - **Stronger Sandbox Foundation** — the daemon can launch agents on the host or inside Docker, with a policy contract and process-level sandbox driver abstraction.
-- **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
+- **Thin Cloud Control Plane** — the cloud handles identity, workspaces, queues, sync, and observability while complex execution stays local-first.
+- **Unified Runtimes** — one dashboard for local daemons and cloud runtimes, with auto-detection of available CLIs and real-time monitoring.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
 
 ## Getting Started
@@ -71,7 +82,7 @@ See the [Self-Hosting Guide](SELF_HOSTING.md) for full instructions.
 
 ## CLI
 
-The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
+The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, inspect ideas and issues, and run the agent daemon.
 
 ```bash
 # Install
@@ -83,13 +94,13 @@ multica login
 multica daemon start
 ```
 
-The daemon auto-detects available agent CLIs (`claude`, `codex`, `opencode`, `trae-cli`, `hermes`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the selected agent through the configured sandbox driver, and reports results back.
+The daemon auto-detects available agent CLIs (`claude`, `codex`, `opencode`, `trae-cli`, `hermes`) on your PATH. When work is assigned, the daemon creates an isolated environment, injects policy/context/skills, runs the selected CLI through the configured sandbox driver, and reports results back.
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference, daemon configuration, and advanced usage.
 
 ## Quickstart
 
-Once you have the CLI installed (or signed up for [Multica Cloud](https://multica.ai)), follow these steps to assign your first task to an agent:
+Once you have the CLI installed (or signed up for [Multica Cloud](https://multica.ai)), follow these steps to start your first local-first product run:
 
 ### 1. Log in and start the daemon
 
@@ -104,42 +115,50 @@ The daemon runs in the background and keeps your machine connected to Multica. I
 
 Open your workspace in the Multica web app. Navigate to **Settings → Runtimes** — you should see your machine listed as an active **Runtime**.
 
-> **What is a Runtime?** A Runtime is a compute environment that can execute agent tasks. It can be your local machine (via the daemon) or a cloud instance. Each runtime reports which agent CLIs are available, so Multica knows where to route work.
+> **What is a Runtime?** A Runtime is the execution boundary where Multica prepares memory, policy, repo/worktree context, and task runs. It can be your local machine (via the daemon) or a cloud-hosted environment, but V1 is intentionally local-first: the local runtime is where the intelligence kernel lives.
 
 ### 3. Create an agent
 
 Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider that exists on that runtime. Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
 
-### 4. Assign your first task
+### 4. Start from an issue or idea
 
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
+Create an issue from the board (or via `multica issue create`), or create an idea in IdeaOS and use it as the source of truth for the project. Use that to drive a root task, then fan out child tasks when needed. The local runtime picks up the work, attaches repo and memory context, executes it with the selected CLI, and reports progress back to Multica.
 
-That's it! Your agent is now part of the team. 🎉
+That's it. You now have a local-first execution loop connected to Multica.
 
 ## Architecture
 
+Multica is local-first by design:
+
+- **Local runtime** — the intelligence kernel for memory, policy, repo/worktree control, swarm coordination, and execution.
+- **Cloud control plane** — identity, workspace sync, queueing, visualization, and remote entry.
+- **External agent CLIs** — execution engines orchestrated by Multica rather than replaced by it.
+
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Next.js    │────>│  Go Backend  │────>│   PostgreSQL     │
-│   Frontend   │<────│  (Chi + WS)  │<────│   (pgvector)     │
-└──────────────┘     └──────┬───────┘     └──────────────────┘
-                            │
-                     ┌──────┴───────┐
-                     │ Agent Daemon │  (runs on your machine)
-                     │ Claude/Codex │
-                     └──────────────┘
+┌─────────────────────────┐      ┌────────────────────────────────────┐
+│      Local Runtime      │<---->│        Cloud Control Plane         │
+│ daemon + workdirs       │      │ frontend + API + PostgreSQL        │
+│ memory/policy/swarm     │      │ auth/sync/queue/visibility         │
+└─────────────┬───────────┘      └────────────────────────────────────┘
+              │
+┌─────────────┴───────────────────────────────────────────────────────┐
+│ Claude Code / Codex / OpenCode / Trae CLI / Hermes Agent           │
+│ execution engines under Multica orchestration                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-| Layer | Stack |
-|-------|-------|
-| Frontend | Next.js 16 (App Router) |
-| Backend | Go (Chi router, sqlc, gorilla/websocket) |
-| Database | PostgreSQL 17 with pgvector |
-| Agent Runtime | Local daemon executing Claude Code, Codex, OpenCode, Trae CLI, or Hermes Agent |
+| Layer | Role | Stack |
+|-------|------|-------|
+| Local Runtime | Intelligence kernel for task execution, memory, policy, repo/worktree control, and swarm coordination | Local daemon |
+| Execution Engines | Existing agent CLIs that actually perform the task work | Claude Code, Codex, OpenCode, Trae CLI, Hermes Agent |
+| Frontend | Cloud UI and operator surface | Next.js 16 (App Router) |
+| Backend | Thin control plane for workspaces, queues, realtime, and runtime coordination | Go (Chi router, sqlc, gorilla/websocket) |
+| Database | Persistent state, runtime metadata, and execution memory | PostgreSQL 17 with pgvector |
 
 ## Runtime Kernel Status
 
-This repository now contains a deeper backend runtime layer than the original "local daemon + two CLIs" setup. The web app remains intentionally light; most of the new functionality lives in `server/`.
+This repository is already closer to a local-first orchestration kernel than a classic task-management app. The web app remains intentionally light; most of the real execution logic lives in `server/` and the local daemon.
 
 ### Functionality
 
