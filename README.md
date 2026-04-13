@@ -51,6 +51,7 @@ The local daemon/runtime is the intelligence core. It is where task-scoped workd
 - **Local Runtime Kernel** — the daemon on your machine is the execution core, not a thin relay.
 - **Existing CLIs as Execution Engines** — Claude Code, Codex, OpenCode, Trae CLI, and Hermes Agent run as the execution layer under Multica orchestration.
 - **Unified CLI Orchestration** — Multica adds one task, event, memory, policy, repo/worktree, and capability model above those CLIs.
+- **Transparent Memory Layer** — the current memory system uses [memsearch](https://github.com/zilliztech/memsearch), keeping agent memory in reviewable Markdown that works across all supported CLIs.
 - **Task-Scoped Execution Environments** — each task gets its own workdir, policy file, runtime-native instruction injection, and controlled repository checkout flow.
 - **Execution Memory** — completed and failed runs write back compact execution memory that can be re-injected into future tasks on the same issue.
 - **Light Swarm Primitives** — parent/child task relationships and swarm roles are modeled in the backend so work can be decomposed before the full swarm product is built out.
@@ -58,6 +59,12 @@ The local daemon/runtime is the intelligence core. It is where task-scoped workd
 - **Thin Cloud Control Plane** — the cloud handles identity, workspaces, queues, sync, and observability while complex execution stays local-first.
 - **Unified Runtimes** — one dashboard for local daemons and cloud runtimes, with auto-detection of available CLIs and real-time monitoring.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
+
+## Memory System Roadmap
+
+- **Start / validation phase: `memsearch`** — use [memsearch](https://github.com/zilliztech/memsearch) as the current memory layer because it is effectively zero-cost to adopt, works with every supported agent CLI, and keeps memories as transparent Markdown that humans can inspect and edit directly.
+- **Production / self-evolving phase: `memsearch + OpenViking`** — keep `memsearch` as the transparent Markdown layer, then extend upward with [OpenViking](https://github.com/volcengine/OpenViking) for the `viking://` abstraction, `L0/L1/L2` memory tiers, and automatic extraction needed for real swarm intelligence and agent self-evolution.
+- **End state: transparent + unified + self-evolving memory** — map the `memsearch` Markdown directory into `viking://user/memories/` so Multica gets transparent human-editable memory, one unified address space, and a self-evolving memory stack in the same system.
 
 ## Getting Started
 
