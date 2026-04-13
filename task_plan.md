@@ -1,72 +1,47 @@
-# Task Plan: GitHub IdeaOS MVP
+# Task Plan: Enforce Planning Workflow In AGENTS.md
 
 ## Goal
-Add a production-usable MVP inside the existing Multica web app that lets a user configure a GitHub repository, browse idea files under `ideas/`, create a new idea, edit idea content in a minimal editor, and auto-save changes back to GitHub with commits.
+
+Add a mandatory planning-workflow rule to the root `AGENTS.md` so plan-mode and multi-step work in this repository must use the `planning-with-files` skill and keep the repo-root planning files updated.
 
 ## Current Phase
-Phase 6
+
+Phase 4 complete
 
 ## Phases
 
-### Phase 1: Requirements & Discovery
-- [x] Audit existing workspace repo settings, editor, navigation, and backend patterns
-- [x] Decide the smallest GitHub-backed MVP that fits current architecture
-- [x] Document findings in findings.md
+### Phase 1: Discovery
+- [x] Read the current root `AGENTS.md`
+- [x] Read the `planning-with-files` skill instructions
+- [x] Confirm the canonical planning filenames used by the skill
 - **Status:** complete
 
-### Phase 2: Data Model & API Design
-- [x] Define IdeaOS workspace configuration shape
-- [x] Define backend GitHub proxy endpoints for list/read/create/update
-- [x] Define frontend data model and page structure
+### Phase 2: Edit
+- [x] Add a new `Planning Workflow (IMPORTANT)` section to `AGENTS.md`
+- [x] State that `planning-with-files` is mandatory for plan-mode and multi-step work
+- [x] State that `task_plan.md`, `findings.md`, and `progress.md` are required
 - **Status:** complete
 
-### Phase 3: Backend Implementation
-- [x] Add GitHub content client and frontmatter helpers
-- [x] Add IdeaOS handlers and routes
-- [x] Reuse workspace update flow for IdeaOS configuration
-- [x] Add tests for GitHub content translation and handlers
+### Phase 3: Verification
+- [x] Re-read the updated `AGENTS.md`
+- [x] Confirm the new rule is phrased as a hard constraint
+- [x] Summarize the change to the user
 - **Status:** complete
 
-### Phase 4: Frontend Implementation
-- [x] Add Ideas list page
-- [x] Add Idea editor page with autosave
-- [x] Add new-idea flow
-- [x] Add workspace settings UI for GitHub IdeaOS config
-- [x] Add sidebar navigation entry
+### Phase 4: Delivery
+- [x] Stage the AGENTS and planning-file updates
+- [x] Commit the change with a conventional docs commit message
 - **Status:** complete
-
-### Phase 5: Verification & Runtime Validation
-- [x] Run targeted frontend/backend tests
-- [x] Run broader typecheck and test suites
-- [x] Rebuild and restart services
-- [x] Verify the live UI and GitHub API path behavior
-- **Status:** complete
-
-### Phase 6: Delivery
-- [x] Summarize the shipped MVP
-- [x] Document current limits and next upgrades
-- **Status:** in_progress
-
-## MVP Scope Decision
-- Implement as a new web feature inside the current Next.js + Go app, not as a separate Flutter app.
-- Use GitHub Contents API through the existing backend for safety.
-- Store GitHub IdeaOS configuration at the workspace level.
-- Support a single configured GitHub repo/path pair for the MVP.
-- Keep AI auto-structuring lightweight for now: title normalization, timestamps, tags parsing from frontmatter, and generated file template.
-
-## Key Questions
-1. Where should GitHub repo configuration live in the current data model and UI?
-2. What is the cleanest backend integration point for reading/writing repo files without introducing a large new auth subsystem?
-3. Which parts of the user’s broader vision belong in this MVP versus future phases?
 
 ## Decisions Made
+
 | Decision | Rationale |
 |----------|-----------|
-| Build inside existing Multica web app | Fastest path to a working feature in this repo |
-| Backend mediates GitHub API access | Avoid exposing GitHub tokens directly to browser code |
-| One repo / one `ideas/` directory for MVP | Matches user’s core spec and keeps scope controlled |
+| Use the skill's real filenames: `task_plan.md`, `findings.md`, `progress.md` | Those are the canonical files the skill expects and auto-reads |
+| Add the rule only to the root `AGENTS.md` | The planning requirement is global and should apply to the whole repo |
 
 ## Errors Encountered
+
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| Existing planning files were for an unrelated deployment task | 1 | Replaced them with a fresh IdeaOS implementation plan |
+| Earlier broad rewrite attempts were interrupted mid-edit | 1 | Apply only the requested planning constraint in a small, focused patch |

@@ -70,3 +70,22 @@ make start-worktree
 - Prefer `rg` for search.
 - Prefer repo-local patterns over inventing new ones.
 - Keep root instructions short; put subsystem detail in child `AGENTS.md` files.
+
+## Planning Workflow (IMPORTANT)
+
+- For any plan-mode task, multi-step task, research task, or work expected to take more than a few tool calls, YOU MUST use the `planning-with-files` skill.
+- The required repo-root planning files are `task_plan.md` (this repo's plan file), `findings.md`, and `progress.md`.
+- Before doing substantive work, YOU MUST read the existing planning files if they already exist. If the task is new, create or replace them for the current task.
+- After each phase, major discovery, or verification step, YOU MUST update the planning files.
+- This project is large enough that work MUST be tracked end-to-end through those planning files.
+
+## Coding Conventions
+- 所有新功能必须写严格测试
+- 禁止直接改生产 API Key
+- PR 必须包含变更说明 + 测试通过截图
+
+## Constraints
+- NEVER 直接 commit 未通过 lint 的代码
+- 每次修改后必须验证功能正常
+
+See @docs/code-review.md for detailed review checklist.
