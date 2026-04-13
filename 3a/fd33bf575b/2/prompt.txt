@@ -1,0 +1,1 @@
+Review the code changes introduced by commit 4b53510e0b402994ac558badae83433a949c2a2d ("docs: refresh AGENTS instructions"). Provide prioritized, actionable findings.
