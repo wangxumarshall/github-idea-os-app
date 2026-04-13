@@ -1,47 +1,60 @@
-# Task Plan: Enforce Planning Workflow In AGENTS.md
+# Task Plan: Rewrite AGENTS.md Hierarchy
 
 ## Goal
 
-Add a mandatory planning-workflow rule to the root `AGENTS.md` so plan-mode and multi-step work in this repository must use the `planning-with-files` skill and keep the repo-root planning files updated.
+Rewrite the root and child `AGENTS.md` files so they align with official OpenAI Codex and agents.md guidance, stay faithful to this repository's real commands and workflows, and clearly encode worktree isolation, verification, security, and project-specific gotchas.
 
 ## Current Phase
 
-Phase 4 complete
+Phase 5 complete
 
 ## Phases
 
-### Phase 1: Discovery
-- [x] Read the current root `AGENTS.md`
-- [x] Read the `planning-with-files` skill instructions
-- [x] Confirm the canonical planning filenames used by the skill
+### Phase 1: Discovery And Audit
+- [x] Read the current root and child `AGENTS.md` files
+- [x] Read `CONTRIBUTING.md`
+- [x] Read `Makefile`, package scripts, and helper scripts
+- [x] Review official AGENTS.md / Codex guidance
+- [x] Capture repo-specific constraints and gotchas
 - **Status:** complete
 
-### Phase 2: Edit
-- [x] Add a new `Planning Workflow (IMPORTANT)` section to `AGENTS.md`
-- [x] State that `planning-with-files` is mandatory for plan-mode and multi-step work
-- [x] State that `task_plan.md`, `findings.md`, and `progress.md` are required
+### Phase 2: Draft The New Hierarchy
+- [x] Define the root structure and section layout
+- [x] Decide what belongs in root vs child files
+- [x] Rewrite root `AGENTS.md`
+- [x] Rewrite `server/AGENTS.md`
+- [x] Rewrite `apps/web/AGENTS.md`
+- [x] Rewrite `e2e/AGENTS.md`
 - **Status:** complete
 
-### Phase 3: Verification
-- [x] Re-read the updated `AGENTS.md`
-- [x] Confirm the new rule is phrased as a hard constraint
-- [x] Summarize the change to the user
+### Phase 3: Verify Consistency
+- [x] Re-read all updated AGENTS files
+- [x] Confirm commands, paths, and claims are accurate
+- [x] Check for contradictions between root and children
 - **Status:** complete
 
 ### Phase 4: Delivery
+- [x] Summarize the rewrite and key changes
+- [x] Include the official sources used
+- **Status:** complete
+
+### Phase 5: Commit
 - [x] Stage the AGENTS and planning-file updates
-- [x] Commit the change with a conventional docs commit message
+- [x] Commit the current rewrite with a conventional docs message
 - **Status:** complete
 
 ## Decisions Made
 
 | Decision | Rationale |
 |----------|-----------|
-| Use the skill's real filenames: `task_plan.md`, `findings.md`, `progress.md` | Those are the canonical files the skill expects and auto-reads |
-| Add the rule only to the root `AGENTS.md` | The planning requirement is global and should apply to the whole repo |
+| Keep the root file concise and global | Matches official AGENTS guidance and reduces instruction conflicts |
+| Put architecture and local command details in the nearest child file | Improves relevance and adherence for subtree-specific work |
+| Encode `.env` / `.env.worktree` / shared PostgreSQL rules explicitly | These are repo-critical and easy to get wrong |
+| Document that `make check` does not run lint | The current repo behavior differs from common templates and must not be misrepresented |
+| Keep `planning-with-files` mandatory for complex tasks, but exempt simple housekeeping tasks | Matches the current root instruction policy |
 
 ## Errors Encountered
 
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| Earlier broad rewrite attempts were interrupted mid-edit | 1 | Apply only the requested planning constraint in a small, focused patch |
+| Earlier AGENTS rewrite attempts were interrupted mid-edit | 1 | Restart from the current workspace state and apply a full clean rewrite |

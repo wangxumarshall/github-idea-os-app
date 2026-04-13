@@ -1,42 +1,53 @@
 # Web Instructions
 
-These instructions apply to `apps/web/`.
+These instructions apply to `apps/web/`. Follow root `AGENTS.md` first, then this file for frontend-specific rules.
 
 ## Architecture
 
-- `app/` is the App Router shell layer. Keep route files thin.
-- `features/` holds business logic by domain.
-- `shared/` holds cross-feature API, types, and utilities.
-- `test/` holds shared frontend test setup.
+- `app/` is the App Router shell layer. Route files must stay thin.
+- `features/` holds domain logic, stores, and feature-specific UI.
+- `shared/` holds cross-feature API clients, types, hooks, and utilities.
+- `components/ui/` contains shared UI primitives. Reuse them before creating new ones.
+- `test/setup.ts` is the shared Vitest setup entry point.
 
-## Web Rules
+## Key Commands (YOU MUST use these exact commands)
 
-- Prefer re-exporting feature pages from `app/` instead of placing business logic in route files.
-- Within a feature, use relative imports. Across features or into shared code, use the `@/` alias.
-- Use one Zustand store per feature domain. Do not add React Context for shared data that belongs in a store.
-- Stores must not use router hooks. Keep navigation in components.
-- Cross-store reads should use `useOtherStore.getState()` inside actions.
-- Preserve the dependency direction already documented in the repo: workspace -> auth, realtime -> auth, issues -> workspace.
+- Run web dev server: `pnpm --filter @multica/web dev`
+- Build web app: `pnpm --filter @multica/web build`
+- Preview web build: `pnpm --filter @multica/web start`
+- Typecheck: `pnpm --filter @multica/web typecheck`
+- Lint: `pnpm --filter @multica/web lint`
+- Lint with autofix when needed: `pnpm --filter @multica/web lint -- --fix`
+- Run all web tests: `pnpm --filter @multica/web test`
+- Run a focused web test file: `pnpm --filter @multica/web test -- path/to/file.test.tsx`
 
-## UI Rules
+## Web Rules (IMPORTANT - NEVER violate)
 
-- Prefer shadcn components and design tokens over custom primitives and hardcoded colors.
-- Keep feature-specific UI inside its feature module.
-- Pay attention to overflow, truncation, spacing, and alignment.
-- Follow the repo style already in use: strict TypeScript, 2-space indentation, double quotes, semicolons, PascalCase components, camelCase hooks and helpers.
+- YOU MUST keep route files thin and move domain logic into `features/`.
+- Prefer re-exporting feature entry points from `app/` when that pattern already exists for the route.
+- Within a feature, prefer relative imports. Across features or into shared code, use the `@/` alias.
+- Use function components and hooks. Do not introduce class components.
+- Use one Zustand store per feature or domain. Do not add React Context for state that belongs in a store.
+- Stores MUST NOT use router hooks. Keep navigation in components.
+- Cross-store reads belong inside actions via `useOtherStore.getState()`.
+- Preserve the established dependency direction: `workspace -> auth`, `realtime -> auth`, `issues -> workspace`.
+- Use `apps/web/shared/logger.ts` for new logging. Do not add new `console.*` calls outside the logger implementation or temporary debugging you remove before finishing.
+- Keep TypeScript strict. Do not add new `any` unless an external boundary forces it; if that happens, isolate it and leave a short justification.
+- For new files, prefer imports ordered `React/Next -> third-party -> internal`, while still matching the surrounding file when editing existing code.
+- Reuse shared UI primitives and design tokens before inventing custom colors or components.
 
-## Commands
-
-```bash
-pnpm --filter @multica/web dev
-pnpm --filter @multica/web build
-pnpm --filter @multica/web typecheck
-pnpm --filter @multica/web test
-pnpm --filter @multica/web lint
-```
-
-## Testing
+## Testing And Verification
 
 - Use Vitest with Testing Library.
 - Mock external or third-party boundaries only.
-- Add or update colocated tests when changing route behavior, store logic, editor behavior, or shared UI contracts.
+- Route behavior, store logic, editor behavior, and shared UI contract changes MUST add or update colocated tests.
+- After web changes, YOU MUST run `pnpm --filter @multica/web typecheck`, `pnpm --filter @multica/web lint`, and the narrowest relevant test command.
+- For cross-page or user-visible flows, finish with the relevant Playwright spec or `make check`.
+
+## Gotchas
+
+- `playwright.config.ts` lives at the repo root, not inside `e2e/`.
+- Direct Playwright runs do not start services for you.
+- Existing code still has some legacy `console.*` usage. Do not copy that pattern into new code.
+- `FRONTEND_PORT` drives `pnpm --filter @multica/web dev`.
+- `apps/web/tsconfig.json` is strict and includes the whole app, so unrelated type errors can surface during web changes.
